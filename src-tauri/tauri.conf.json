@@ -1,0 +1,43 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "eStock Manager",
+  "version": "1.1.0",
+  "identifier": "online.techalphahub.eaterymanager",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://127.0.0.1:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "eStock Manager",
+        "width": 1320,
+        "height": 840,
+        "minWidth": 960,
+        "minHeight": 640,
+        "center": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' asset: data: blob:; connect-src ipc: http://ipc.localhost"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["dmg", "app", "msi", "nsis"],
+    "category": "Business",
+    "publisher": "TechAlpha Global Concept",
+    "copyright": "© 2026 TechAlpha Global Concept",
+    "shortDescription": "Inventory, sales and receipts for any business",
+    "longDescription": "Offline-first inventory, point of sale, receipts and email for supermarkets, eateries, dry cleaners, farms and any business that sells goods or services. Multi-user with owner, manager and cashier roles.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  }
+}
