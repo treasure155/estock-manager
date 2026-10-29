@@ -1,6 +1,6 @@
 [package]
 name = "eatery-manager"
-version = "2.0.0"
+version = "3.0.0"
 description = "eStock Manager - offline-first inventory, sales and receipt desktop application for any business"
 authors = ["TechAlpha Global Concept"]
 edition = "2021"
