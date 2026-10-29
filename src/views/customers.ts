@@ -1,10 +1,12 @@
 import { auth, call } from '../api';
 import { exportCsv, nairaPlain } from '../lib/csv';
 import { $, confirmDialog, debounce, emptyState, errText, esc, formValues, modal, toast, withBusy } from '../lib/dom';
-import { isoDate, money } from '../lib/format';
+import { dateLabel, isoDate, money } from '../lib/format';
 import { icon } from '../lib/icons';
 import { store } from '../store';
-import type { Customer } from '../types';
+import type { Customer, Statement } from '../types';
+import { printHtml } from '../lib/receipt';
+import { shareWhatsApp, statementText } from '../lib/whatsapp';
 import type { ViewCtx } from './shell';
 
 export async function render(ctx: ViewCtx) {
@@ -35,6 +37,7 @@ export async function render(ctx: ViewCtx) {
         <td class="num">${c.balance_kobo > 0 ? `<b class="warn-text">${money(c.balance_kobo)}</b>` : '<span class="muted">—</span>'}</td>
         <td class="actions-col">
           <button class="btn btn-ghost btn-sm" data-receipts="${c.id}">Receipts</button>
+          <button class="btn btn-ghost btn-sm" data-statement="${c.id}">Statement</button>
           ${auth.can('manager') ? `<button class="icon-btn" data-edit="${c.id}" aria-label="Edit ${esc(c.name)}">${icon('edit', 16)}</button>` : ''}
         </td></tr>`).join('')}</tbody></table></div>`
       : emptyState(rows.length ? 'Nobody owes you' : `No ${plural.toLowerCase()} yet`, rows.length ? 'Every saved customer is fully paid up.' : `Add ${plural.toLowerCase()} here or while making a sale. Credit sales need a named ${label.toLowerCase()}.`);
@@ -47,6 +50,8 @@ export async function render(ctx: ViewCtx) {
     const t = e.target as HTMLElement;
     const r = t.closest<HTMLElement>('[data-receipts]');
     if (r) ctx.go('receipts', { customer_id: Number(r.dataset.receipts) });
+    const st = t.closest<HTMLElement>('[data-statement]');
+    if (st) statementDialog(rows.find((c) => c.id === Number(st.dataset.statement))!);
     const ed = t.closest<HTMLElement>('[data-edit]');
     if (ed) customerForm(rows.find((c) => c.id === Number(ed.dataset.edit))!, () => load(search.value));
   });
@@ -79,4 +84,40 @@ function customerForm(c: Customer | null, done: () => void) {
     if (await confirmDialog({ title: `Delete ${c!.name}?`, message: 'Their old receipts keep the name as it was written at the time of sale.', confirm: 'Delete', danger: true }) === null) return;
     try { await call('delete_customer', { id: c!.id }); toast('Deleted'); m.close(); done(); } catch (x) { toast(errText(x), 'error'); }
   });
+}
+
+function statementMarkup(s: Statement): string {
+  const b = store.settings;
+  return `<article class="statement">
+    <header class="statement-head"><div><h2>${esc(b.business_name || 'My Business')}</h2><p>${[b.business_address, b.business_phone, b.business_email].filter(Boolean).map(esc).join(' · ')}</p></div><div class="statement-title"><b>Statement of account</b><span>${esc(dateLabel(s.from))} to ${esc(dateLabel(s.to))}</span></div></header>
+    <p class="statement-to"><b>${esc(s.customer_name)}</b>${s.customer_phone ? `<br>${esc(s.customer_phone)}` : ''}${s.customer_address ? `<br>${esc(s.customer_address)}` : ''}</p>
+    <table class="table compact"><thead><tr><th>Date</th><th>Details</th><th>Reference</th><th class="num">Charged</th><th class="num">Paid / credited</th><th class="num">Balance</th></tr></thead><tbody>
+      <tr><td>${esc(dateLabel(s.from))}</td><td colspan="4"><b>Opening balance</b></td><td class="num"><b>${money(s.opening_kobo)}</b></td></tr>
+      ${s.lines.map((l) => `<tr><td>${esc(dateLabel(l.date))}</td><td>${esc(l.kind)}: ${esc(l.description)}</td><td>${esc(l.reference)}</td><td class="num">${l.debit_kobo ? money(l.debit_kobo) : ''}</td><td class="num">${l.credit_kobo ? money(l.credit_kobo) : ''}</td><td class="num">${money(l.balance_kobo)}</td></tr>`).join('')}
+    </tbody><tfoot><tr><th colspan="5">Balance due</th><th class="num">${money(s.closing_kobo)}</th></tr></tfoot></table>
+  </article>`;
+}
+
+function statementDialog(c: Customer) {
+  const t = new Date();
+  const range = { from: isoDate(new Date(t.getFullYear(), t.getMonth() - 2, 1)), to: isoDate(t) };
+  let current: Statement | null = null;
+  const m = modal({ title: `Statement: ${c.name}`, size: 'lg', body: `<div class="stack">
+    <div class="toolbar tight"><label class="date-field"><span>From</span><input type="date" data-sf value="${range.from}"></label><label class="date-field"><span>To</span><input type="date" data-st value="${range.to}" max="${range.to}"></label>
+      <button class="btn btn-ghost push-right" data-wa>${icon('chat', 16)} WhatsApp</button><button class="btn btn-primary" data-print>${icon('print', 16)} Print</button></div>
+    <div class="statement-wrap" data-out></div></div>` });
+  const out = $('[data-out]', m.el)!;
+  const load = async () => {
+    try { current = await call<Statement>('customer_statement', { customerId: c.id, from: range.from, to: range.to }); out.innerHTML = statementMarkup(current); }
+    catch (e) { out.innerHTML = `<p class="form-error">${esc(errText(e))}</p>`; }
+  };
+  load();
+  m.el.addEventListener('change', (e) => {
+    const el = e.target as HTMLInputElement;
+    if (el.matches('[data-sf]')) range.from = el.value;
+    if (el.matches('[data-st]')) range.to = el.value;
+    if (range.from && range.to) load();
+  });
+  $('[data-print]', m.el)!.addEventListener('click', () => current && printHtml(statementMarkup(current)));
+  $('[data-wa]', m.el)!.addEventListener('click', () => current && shareWhatsApp(c.phone, statementText(current)));
 }

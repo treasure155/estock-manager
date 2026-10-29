@@ -457,8 +457,51 @@ pub fn apply_template(conn: &Connection, key: &str, load_samples: bool, user_nam
             }
             added += 1;
         }
+        if added > 0 { sample_extras(conn, t.key)?; }
+    }
+    // Switch on the screens this kind of business needs. Never switches anything off.
+    match t.key {
+        "broiler_farm" => db::set_setting(conn, "feature_flocks", "1")?,
+        "eatery" => db::set_setting(conn, "feature_recipes", "1")?,
+        _ => {}
     }
     Ok(added)
+}
+
+/// v2 extras for the sample data: carton and wholesale prices, expiry
+/// tracking and example recipes, so new users see each feature working.
+fn sample_extras(conn: &Connection, key: &str) -> Result<(), String> {
+    let exec = |sql: &str| conn.execute_batch(sql).map_err(|e| e.to_string());
+    match key {
+        "supermarket" => exec(
+            "UPDATE products SET pack_unit='carton',pack_size=40,pack_price_kobo=1150000,wholesale_price_kobo=28000,wholesale_min_qty=10 WHERE sku='SPM-004';
+             UPDATE products SET pack_unit='pack of 12',pack_size=12,pack_price_kobo=540000,wholesale_price_kobo=46000,wholesale_min_qty=6 WHERE sku IN ('SPM-016','SPM-031','SPM-032');
+             UPDATE products SET pack_unit='pack of 12',pack_size=12,pack_price_kobo=330000 WHERE sku IN ('SPM-017','SPM-035');
+             UPDATE products SET pack_unit='carton',pack_size=24,pack_price_kobo=1800000 WHERE sku='SPM-033';
+             UPDATE products SET track_expiry=1 WHERE sku IN ('SPM-001','SPM-002','SPM-018','SPM-028','SPM-029','SPM-039','SPM-040','SPM-043');",
+        ),
+        "eatery" => {
+            // Cooked-to-order meals: no plate count; the ingredients come out of kitchen stock instead.
+            let recipes: &[(&str, &[(&str, f64)])] = &[
+                ("EAT-001", &[("EAT-ING-01", 0.004), ("EAT-ING-02", 0.0008), ("EAT-ING-03", 0.01), ("EAT-ING-07", 0.002)]),
+                ("EAT-002", &[("EAT-ING-01", 0.004), ("EAT-ING-02", 0.001), ("EAT-ING-07", 0.002)]),
+                ("EAT-008", &[("EAT-ING-06", 0.35), ("EAT-ING-02", 0.0006)]),
+            ];
+            for (meal, lines) in recipes {
+                let Some(mid): Option<i64> = conn.query_row("SELECT id FROM products WHERE sku=?1", [meal], |r| r.get(0)).optional().map_err(|e| e.to_string())? else { continue };
+                for (ing, qty) in *lines {
+                    if let Some(iid) = conn.query_row("SELECT id FROM products WHERE sku=?1", [ing], |r| r.get::<_, i64>(0)).optional().map_err(|e| e.to_string())? {
+                        conn.execute("INSERT OR IGNORE INTO recipe_items(product_id,material_id,quantity) VALUES(?1,?2,?3)", params![mid, iid, qty]).map_err(|e| e.to_string())?;
+                    }
+                }
+                conn.execute("UPDATE products SET track_stock=0,stock_qty=0,reorder_level=0 WHERE id=?1", [mid]).map_err(|e| e.to_string())?;
+                conn.execute("DELETE FROM stock_movements WHERE product_id=?1 AND movement_type='opening'", [mid]).map_err(|e| e.to_string())?;
+            }
+            Ok(())
+        }
+        "broiler_farm" | "farm_produce" => exec("UPDATE products SET track_expiry=1 WHERE kind='material' AND (name LIKE '%vaccine%' OR name LIKE '%medic%' OR name LIKE '%antibiotic%' OR name LIKE '%vitamin%');"),
+        _ => Ok(()),
+    }
 }
 
 // ------------------------------------------------------------------ commands

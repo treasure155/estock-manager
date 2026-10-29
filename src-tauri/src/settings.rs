@@ -5,7 +5,7 @@ use serde::Serialize;
 use std::collections::HashMap;
 
 const SECRET_KEYS: [&str; 1] = ["smtp_password"];
-const BOOL_KEYS: [&str; 5] = ["tax_enabled", "allow_negative_stock", "allow_price_override", "track_collection", "email_bcc_self"];
+const BOOL_KEYS: [&str; 8] = ["tax_enabled", "allow_negative_stock", "allow_price_override", "track_collection", "email_bcc_self", "require_shift", "feature_flocks", "feature_recipes"];
 const MAX_LOGO_BYTES: usize = 700 * 1024;
 
 pub fn is_hex_color(v: &str) -> bool {
@@ -60,6 +60,8 @@ fn validate(key: &str, value: &str) -> Result<String, String> {
         "smtp_username" => max_len(v, 254, "SMTP username")?,
         "smtp_password" => { if value.len() > 256 { return Err("SMTP password is too long".into()); } return Ok(value.to_string()); }
         "smtp_from_name" => max_len(v, 80, "Sender name")?,
+        "expiry_warn_days" => { let d: u32 = v.parse().map_err(|_| "Expiry warning must be a number of days".to_string())?; if !(1..=365).contains(&d) { return Err("Expiry warning must be between 1 and 365 days".into()); } }
+        "whatsapp_country_code" => { if v.is_empty() || v.len() > 4 || !v.chars().all(|c| c.is_ascii_digit()) { return Err("Country code must be 1 to 4 digits, e.g. 234".into()); } }
         _ => return Err(format!("Unknown setting: {key}")),
     }
     Ok(v.to_string())
@@ -72,6 +74,7 @@ pub fn get_settings(state: tauri::State<'_, AppState>, session_token: String) ->
     let mut all = db::all_settings(&conn)?;
     let has_password = !all.get("smtp_password").map(|s| s.is_empty()).unwrap_or(true);
     for k in SECRET_KEYS { all.remove(k); }
+    for k in ["license_key", "clock_last_seen", "trial_started"] { all.remove(k); }
     if me.role < Role::Owner {
         all.retain(|k, _| !k.starts_with("smtp_"));
     } else {
@@ -88,6 +91,7 @@ pub fn save_settings(state: tauri::State<'_, AppState>, session_token: String, v
         // An empty password field means "keep the saved one".
         if k == "smtp_password" && v.is_empty() { continue; }
         if k == "smtp_password_set" || k == "business_type" { continue; }
+        if ["license_key", "trial_started", "clock_last_seen", "auto_backup", "backup_dir", "backup_keep", "last_auto_backup", "last_backup_error"].contains(&k.as_str()) { continue; }
         clean.push((k.clone(), validate(k, v)?));
     }
     let mut conn = state.db()?;

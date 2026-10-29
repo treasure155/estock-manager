@@ -3,13 +3,19 @@
 //! SQLite database; the UI talks to it only through the commands below.
 
 mod auth;
+mod backup;
 mod db;
 mod email;
+mod expenses;
+mod flocks;
 mod inventory;
+mod license;
+mod purchases;
 mod recovery;
 mod reports;
 mod sales;
 mod settings;
+mod shifts;
 mod templates;
 
 use rusqlite::Connection;
@@ -21,6 +27,7 @@ pub struct AppState {
     pub sessions: Mutex<HashMap<String, auth::Session>>,
     pub login_failures: Mutex<HashMap<String, (u32, Instant)>>,
     pub recovery_failures: Mutex<(u32, Instant)>,
+    pub license: Mutex<Option<license::LicenseState>>,
 }
 
 impl AppState {
@@ -38,17 +45,34 @@ fn print_window(window: tauri::WebviewWindow) -> Result<(), String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_process::init());
+    #[cfg(desktop)]
+    {
+        builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    }
+    builder
         .setup(|app| {
             let path = db::db_path(app.handle()).map_err(std::io::Error::other)?;
             let conn = db::open(&path).map_err(std::io::Error::other)?;
-            app.manage(AppState { conn: Mutex::new(conn), sessions: Mutex::new(HashMap::new()), login_failures: Mutex::new(HashMap::new()), recovery_failures: Mutex::new((0, Instant::now())) });
+            let lic = license::compute(app.handle(), &conn);
+            app.manage(AppState {
+                conn: Mutex::new(conn),
+                sessions: Mutex::new(HashMap::new()),
+                login_failures: Mutex::new(HashMap::new()),
+                recovery_failures: Mutex::new((0, Instant::now())),
+                license: Mutex::new(Some(lic)),
+            });
+            backup::start_auto(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             // public
             auth::setup_status, auth::setup_owner, auth::login, settings::branding, templates::list_templates,
             recovery::recovery_options, recovery::recover_account,
+            license::license_status, license::activate_license,
             // security (owner)
             recovery::security_status, recovery::regenerate_recovery_key, recovery::save_security_questions,
             // account
@@ -59,11 +83,22 @@ pub fn run() {
             inventory::list_products, inventory::save_product, inventory::remove_product, inventory::adjust_stock, inventory::list_movements,
             inventory::list_categories, inventory::save_category, inventory::delete_category,
             inventory::list_payment_methods, inventory::save_payment_method,
+            inventory::list_batches, inventory::get_recipe, inventory::save_recipe, inventory::generate_barcodes,
             // sales
             sales::create_receipt, sales::list_receipts, sales::get_receipt, sales::record_payment, sales::void_receipt, sales::update_fulfilment,
-            sales::list_customers, sales::save_customer, sales::delete_customer,
-            // reports & files
-            reports::dashboard, reports::sales_report, reports::save_export, reports::backup_database,
+            sales::create_return, sales::hold_sale, sales::list_held_sales, sales::delete_held_sale,
+            sales::list_customers, sales::save_customer, sales::delete_customer, sales::customer_statement,
+            // shifts & expenses
+            shifts::current_shift, shifts::open_shift, shifts::close_shift, shifts::list_shifts, shifts::shift_report,
+            expenses::list_expenses, expenses::save_expense, expenses::delete_expense,
+            // suppliers & purchases
+            purchases::list_suppliers, purchases::save_supplier, purchases::delete_supplier,
+            purchases::create_purchase, purchases::list_purchases, purchases::get_purchase, purchases::record_supplier_payment,
+            // broiler flocks
+            flocks::list_flocks, flocks::get_flock, flocks::save_flock, flocks::close_flock, flocks::add_flock_entry, flocks::delete_flock_entry, flocks::delete_flock,
+            // reports, files & backups
+            reports::dashboard, reports::sales_report, reports::save_export,
+            backup::backup_status, backup::save_backup_settings, backup::backup_now,
             // email
             email::send_receipt_email, email::send_test_email,
             // printing

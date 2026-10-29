@@ -15,6 +15,7 @@ export function receiptMarkup(r: Receipt, opts: { width?: string } = {}): string
     <div class="slip-line">
       <div class="slip-name">${esc(i.product_name)}</div>
       <div class="slip-calc"><span>${qty(i.quantity)} ${esc(i.unit)} × ${money(i.unit_price_kobo)}</span><b>${money(i.line_total_kobo)}</b></div>
+      ${i.returned_qty ? `<div class="slip-calc slip-returned"><span>Returned ${qty(i.returned_qty)} ${esc(i.unit)}</span></div>` : ''}
     </div>`).join('');
   const row = (label: string, value: string, cls = '') => `<div class="slip-row ${cls}"><span>${esc(label)}</span><span>${value}</span></div>`;
   const pays = r.payments.map((p) => row(`${p.method}${p.reference ? ` (${p.reference})` : ''}`, money(p.amount_kobo))).join('');
@@ -39,10 +40,12 @@ export function receiptMarkup(r: Receipt, opts: { width?: string } = {}): string
       ${r.discount_kobo ? row('Discount', `−${money(r.discount_kobo)}`) : ''}
       ${r.tax_kobo ? row(`${s.tax_label || 'Tax'} (${s.tax_rate}%)`, money(r.tax_kobo)) : ''}
       ${row('Total', money(r.total_kobo), 'slip-grand')}
+      ${r.returned_kobo ? row('Returned goods', `−${money(r.returned_kobo)}`) : ''}
     </div>
     <div class="slip-pay">
       ${pays}
       ${r.change_kobo > 0 ? row('Change', money(r.change_kobo)) : ''}
+      ${r.refunded_kobo > 0 ? row('Refunded', `−${money(r.refunded_kobo)}`) : ''}
       ${r.balance_kobo > 0 ? row('Balance due', money(r.balance_kobo), 'slip-due') : ''}
       ${row('Status', statusText[r.payment_status] ?? r.payment_status)}
     </div>

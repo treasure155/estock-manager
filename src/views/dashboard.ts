@@ -52,17 +52,18 @@ export async function render(ctx: ViewCtx) {
   const week = d.last_7_days.reduce((a, p) => a + p.total_kobo, 0);
 
   ctx.main.innerHTML = `
+    ${!mine && (d.expired_count || d.expiring_count) ? `<div class="callout callout-warn"><div><b>${d.expired_count ? `${d.expired_count} batch${d.expired_count === 1 ? ' has' : 'es have'} expired` : `${d.expiring_count} batch${d.expiring_count === 1 ? '' : 'es'} expiring soon`}</b><span>${d.expired_count && d.expiring_count ? `${d.expiring_count} more expire within ${esc(store.settings.expiry_warn_days || '30')} days. ` : ''}Sell, discount or remove them before they become a loss.</span></div><button class="btn btn-primary btn-sm" data-go="inventory" data-tab="expiry">See batches</button></div>` : ''}
     ${needsRecovery ? `<div class="callout callout-warn"><div><b>Set up account recovery</b><span>Without a recovery key and security questions, a forgotten owner password cannot be reset.</span></div><button class="btn btn-primary btn-sm" data-go="settings" data-section="security">Set it up</button></div>` : ''}
     <section class="ledger" aria-label="Today at a glance">
       <div class="ledger-cell ledger-lead">
         <span class="ledger-label">${mine ? 'Your sales today' : 'Sales today'}</span>
         <strong class="figure">${money(d.today_sales_kobo)}</strong>
-        <span class="ledger-note">${d.today_receipts} receipt${d.today_receipts === 1 ? '' : 's'} · ${esc(compare)}</span>
+        <span class="ledger-note">${d.today_receipts} receipt${d.today_receipts === 1 ? '' : 's'} · ${esc(compare)}${d.today_returns_kobo ? ` · ${money(d.today_returns_kobo, { whole: true })} returned` : ''}</span>
       </div>
       <div class="ledger-cell">
         <span class="ledger-label">Money received today</span>
         <strong class="figure">${money(d.today_collected_kobo)}</strong>
-        <span class="ledger-note">Includes old balances paid today</span>
+        <span class="ledger-note">${!mine && d.today_expenses_kobo ? `${money(d.today_expenses_kobo, { whole: true })} spent on expenses today` : 'Includes old balances paid today'}</span>
       </div>
       <button class="ledger-cell ledger-link" data-go="receipts" data-status="owing">
         <span class="ledger-label">Owed by ${esc(store.label('customer').toLowerCase())}s</span>
@@ -104,7 +105,7 @@ export async function render(ctx: ViewCtx) {
   root.onclick = (e) => {
     const t = e.target as HTMLElement;
     const go = t.closest<HTMLElement>('[data-go]');
-    if (go) ctx.go(go.dataset.go!, { status: go.dataset.status, fulfilment: go.dataset.fulfilment, low: go.dataset.low, section: go.dataset.section });
+    if (go) ctx.go(go.dataset.go!, { status: go.dataset.status, fulfilment: go.dataset.fulfilment, low: go.dataset.low, section: go.dataset.section, tab: go.dataset.tab });
     const row = t.closest<HTMLElement>('[data-receipt]');
     if (row) ctx.go('receipts', { open: Number(row.dataset.receipt) });
   };

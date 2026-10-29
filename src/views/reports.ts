@@ -48,10 +48,11 @@ export async function render(ctx: ViewCtx) {
     };
     out.innerHTML = `
       <p class="period-line">${esc(dateLabel(r.from))}${r.from !== r.to ? ` to ${esc(dateLabel(r.to))}` : ''}</p>
-      <section class="ledger" aria-label="Summary">
-        <div class="ledger-cell ledger-lead"><span class="ledger-label">Sales</span><strong class="figure">${money(r.net_kobo)}</strong><span class="ledger-note">${r.receipts} receipt${r.receipts === 1 ? '' : 's'}${r.voided ? ` · ${r.voided} voided` : ''}</span></div>
+      <section class="ledger ledger-5" aria-label="Summary">
+        <div class="ledger-cell ledger-lead"><span class="ledger-label">Sales</span><strong class="figure">${money(r.net_kobo)}</strong><span class="ledger-note">${r.receipts} receipt${r.receipts === 1 ? '' : 's'}${r.voided ? ` · ${r.voided} voided` : ''}${r.returns_kobo ? ` · ${money(r.returns_kobo, { whole: true })} returned` : ''}</span></div>
         <div class="ledger-cell"><span class="ledger-label">Gross profit</span><strong class="figure ${r.profit_kobo < 0 ? 'is-bad' : ''}">${money(r.profit_kobo)}</strong><span class="ledger-note">${margin}% margin after ${money(r.cost_kobo, { whole: true })} cost</span></div>
-        <div class="ledger-cell"><span class="ledger-label">Received</span><strong class="figure">${money(r.collected_kobo)}</strong><span class="ledger-note">${r.discount_kobo ? `${money(r.discount_kobo, { whole: true })} given as discount` : 'No discounts given'}</span></div>
+        <div class="ledger-cell"><span class="ledger-label">Net profit</span><strong class="figure ${r.net_profit_kobo < 0 ? 'is-bad' : ''}">${money(r.net_profit_kobo)}</strong><span class="ledger-note">After ${money(r.expenses_kobo, { whole: true })} in expenses</span></div>
+        <div class="ledger-cell"><span class="ledger-label">Received</span><strong class="figure">${money(r.collected_kobo)}</strong><span class="ledger-note">${r.refunds_kobo ? `After ${money(r.refunds_kobo, { whole: true })} refunded · ` : ''}${r.discount_kobo ? `${money(r.discount_kobo, { whole: true })} given as discount` : 'No discounts given'}</span></div>
         <div class="ledger-cell"><span class="ledger-label">Still owed</span><strong class="figure ${r.outstanding_kobo ? 'is-warn' : ''}">${money(r.outstanding_kobo)}</strong><span class="ledger-note">${r.tax_kobo ? `${esc(store.settings.tax_label || 'Tax')} collected ${money(r.tax_kobo, { whole: true })}` : 'From sales in this period'}</span></div>
       </section>
       ${r.by_day.length > 1 ? `<section class="panel"><header class="panel-head"><div><h2>Sales by day</h2></div></header>${barChart(r.by_day, { height: 200 })}</section>` : ''}
@@ -59,6 +60,7 @@ export async function render(ctx: ViewCtx) {
         ${share(r.by_method, 'Money received by method', 'Counted on the day it was paid. Use this to balance the till.')}
         ${share(r.by_category, 'Sales by category', 'Where your money comes from')}
         ${share(r.by_cashier, 'Sales by staff', 'Receipts issued per person')}
+        ${r.by_expense.length ? share(r.by_expense, 'Expenses by category', 'What the business spent in this period') : ''}
       </div>
       <section class="panel flush">
         <header class="panel-head pad"><div><h2>${esc(store.label('items'))} sold</h2><p class="muted small">Sorted by sales. Profit uses the cost price at the time of each sale.</p></div></header>

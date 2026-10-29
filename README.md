@@ -18,7 +18,19 @@ Built with **Tauri 2 + Rust + SQLite** (backend) and **TypeScript + Vite** (fron
 | **Email** | Gmail, Outlook / Microsoft 365, Yahoo, Zoho or any SMTP server. Branded HTML receipt with plain-text fallback, inline logo, reply-to, optional copy to self, and a test-email button. |
 | **Reports** | Sales, gross profit, money received by method (for till balancing), by category, by staff, items sold with profit, outstanding balances, and CSV exports. |
 | **Customise** | Business colours (two-colour theme with 6 presets or any custom colours), light/dark mode, wording ("Product", "Menu item", "Service"; "Customer", "Buyer", "Client"), currency symbol and logo. |
-| **Backup** | One-click database backup to Downloads. |
+| **Cartons & wholesale** | Sell one item as single units or whole packs (carton, crate, bag) with its own pack price. Wholesale price kicks in automatically from a set quantity. Stock is always kept in base units. |
+| **Returns & refunds** | Partial returns by line and quantity. Returned value comes off what the customer owes first; anything paid beyond the new total is refunded. Optional restock (untick for spoilt goods). Reports subtract returns on the day they happen. |
+| **Shifts & cash-up** | Open a shift with the float, close it with a cash count. Expected cash = float + cash taken − cash refunds − cash expenses. Short/over shown per shift; printable Z report. Owner can make shifts compulsory. |
+| **Purchases & suppliers** | Receive goods by unit or carton, with batch and expiry. Weighted-average cost updates automatically. Track what is owed to each supplier and record payments. |
+| **Expenses & net profit** | Expense book with categories. Reports show gross profit, expenses and net profit. |
+| **Expiry & batches** | Per-item expiry tracking. Sales and write-offs use the earliest-expiring batch first (FEFO). Overview warns about expired and soon-to-expire batches. |
+| **Recipes** | Meals or services linked to ingredients. Each sale deducts the ingredients and uses their cost for profit. |
+| **Broiler flocks** | Flocks with daily mortality, culls, feed and weight; costs (optionally issued from stock); bird sales. Shows birds alive, mortality %, FCR, cost per bird/kg and profit. |
+| **WhatsApp & statements** | Send receipts and customer statements of account on WhatsApp (number auto-converted to +234). Printable statements with running balance. |
+| **Held sales & labels** | Park and resume sales. Print price labels with EAN-13 / Code 128 barcodes on A4 label sheets or a label printer. |
+| **Backup** | Automatic daily backup (default `Documents/eStock Backups`, newest 14 kept), custom folder (flash drive, Drive/OneDrive folder), Back up now. |
+| **Licensing** | 14-day free trial per computer, then a licence key made for that computer's Install ID. Keys are Ed25519-signed; only the admin's private key can create them. |
+| **Auto-update** | Signed updates from GitHub Releases. Owners/managers see a banner when a new version is out and install it from Settings → Updates. |
 | **How to** | The full user guide inside the app (Help → How to), with search and printing. It works offline. |
 
 ## Requirements
@@ -47,17 +59,60 @@ Other useful commands:
 
 ```bash
 npm run build                                         # type-check and build the frontend only
-cargo test --manifest-path src-tauri/Cargo.toml        # run the 23 backend tests
+cargo test --manifest-path src-tauri/Cargo.toml        # run the 36 backend tests
 cargo check --manifest-path src-tauri/Cargo.toml       # compile-check the backend
 npm run icons                                          # regenerate every icon from src-tauri/icons/app-icon.png
 ```
 
 Installers are written to `src-tauri/target/release/bundle/`:
 
-- Windows: `msi/eStock Manager_1.1.0_x64_en-US.msi` and `nsis/eStock Manager_1.1.0_x64-setup.exe`
-- macOS: `dmg/eStock Manager_1.1.0_aarch64.dmg` (or `_x64.dmg` on Intel Macs) and `macos/eStock Manager.app`
+- Windows: `msi/eStock Manager_2.0.0_x64_en-US.msi` and `nsis/eStock Manager_2.0.0_x64-setup.exe`
+- macOS: `dmg/eStock Manager_2.0.0_aarch64.dmg` (or `_x64.dmg` on Intel Macs) and `macos/eStock Manager.app`
 
-Build the Windows installer on Windows and the macOS installer on a Mac. To share the macOS app beyond your own machines, sign and notarise it with an Apple Developer account.
+A local build without the licence public key cannot be activated (it shows a 14-day trial, then locks). Official installers come from GitHub Actions, see **Keys and releases** below.
+
+## Keys and releases (admin only)
+
+Two key pairs protect the app. Their **private halves live only on the admin's computer** in `~/.estock-keys/` (Windows: `C:\Users\<you>\.estock-keys\`). Never put that folder in the project or on GitHub, and back it up to a flash drive: if it is lost you can no longer issue licences or ship updates to existing installs.
+
+| Key | Private file (admin computer) | Public half (committed) | Used for |
+|---|---|---|---|
+| Licence signing (Ed25519) | `~/.estock-keys/license-private.pem` | `src-tauri/license_public_key.txt` | Making licence keys |
+| Update signing (minisign) | `~/.estock-keys/updater.key` + `updater-password.txt` | `plugins.updater.pubkey` in `src-tauri/tauri.conf.json` | Signing installers so installed apps accept updates |
+
+### One-time setup (admin computer)
+
+```bash
+npm install
+npm run setup-keys
+```
+
+This creates both key pairs (never overwrites existing ones), writes the two public keys into the project and, if the GitHub CLI (`gh`) is signed in, stores `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` as repository secrets. Without `gh`, it prints the two values to paste under GitHub → repo → Settings → Secrets and variables → Actions.
+
+### Issue a licence (one per computer)
+
+The customer opens **Settings → Licence** (or the activation screen) and sends you the Install ID.
+
+```bash
+npm run license -- issue G147-RQYW-Y4VJ-4EQK                          # never expires
+npm run license -- issue G147-RQYW-Y4VJ-4EQK --days 365 --note "Iya Bisi, Ikot Ekpene"
+npm run license -- list                                               # everything issued
+```
+
+Send back the `ESTK-…` key. It only works on the computer with that Install ID. Issued keys are logged in `~/.estock-keys/issued-licences.csv`.
+
+### Release a version (one push)
+
+1. Raise the version in `package.json`, `src-tauri/tauri.conf.json` and `src-tauri/Cargo.toml` (all three must match).
+2. Run:
+
+```bash
+npm run release
+```
+
+It checks the versions and keys, commits, tags `vX.Y.Z` and pushes the branch and tag together. GitHub Actions builds the Windows (`.exe`, `.msi`) and macOS (universal `.dmg`) installers, signs the update files and **publishes the release** (not a draft) with `latest.json`. Installed copies offer the update automatically. The workflow stops with a clear error if a key or secret is missing.
+
+The macOS app is not notarised, so first-time Mac users right-click the app → Open (or System Settings → Privacy & Security → Open Anyway).
 
 ## First run
 
@@ -109,7 +164,9 @@ This is a desktop app, so nothing is uploaded to a server. Place the project fil
 | `src-tauri/icons/*` | Stay where they are. Tauri reads them during `npm run tauri build`. |
 | Built installer (`.msi` / `-setup.exe` / `.dmg`) | Copy to each shop computer and run it |
 | Database (created automatically) | Windows: `%APPDATA%\online.techalphahub.eaterymanager\eatery-manager.sqlite3`. macOS: `~/Library/Application Support/online.techalphahub.eaterymanager/eatery-manager.sqlite3` |
-| Backups | Saved to the user's **Downloads** folder as `estock-backup-YYYYMMDD-HHMMSS.sqlite3` |
+| Automatic backups | `Documents/eStock Backups/estock-backup-YYYYMMDD-HHMMSS.sqlite3` (or the folder chosen in Settings → Backup) |
+| Trial marker | `.estock-install` in the app config folder (same folder as the database) |
+| Admin signing keys | `~/.estock-keys/` on the admin's computer only |
 | CSV exports | Saved to **Downloads** |
 
 **Upgrading from Eatery Manager:** the app identifier and database file name are unchanged, so installing this version over the old one upgrades the existing database in place. Users, products, receipts and settings are kept. The old admin becomes the Owner, finished products become "For sale" items and ingredients become "Internal use" materials. Back up the old database first (close the app and copy the `.sqlite3` file).
@@ -135,17 +192,22 @@ estock-manager/
 │   ├── api.ts                  Backend command wrapper (attaches session token)
 │   ├── store.ts                Cached settings, items, categories, payment methods
 │   ├── types.ts                Shared types mirroring the Rust structs
-│   ├── lib/                    dom helpers, formatting, theme engine, icons, receipt renderer, CSV
-│   ├── styles/                 base.css (tokens, forms), app.css (shell), views.css, print.css
-│   └── views/                  auth, recovery-ui, shell, dashboard, pos, receipts, inventory, customers, reports, staff, settings, guide (How to)
+│   ├── lib/                    dom, format, theme, icons, receipt, CSV, barcode (EAN-13/Code 128), whatsapp, updater, license-ui
+│   ├── styles/                 base.css (tokens, forms), app.css (shell), views.css, print.css, v2.css
+│   └── views/                  auth, recovery-ui, shell, dashboard, pos, receipts, inventory, customers, shifts, purchases, expenses, flocks, reports, staff, settings, guide
+├── tools/                      Admin-only scripts: setup-keys.mjs, license-admin.mjs, release.mjs, common.mjs
 └── src-tauri/                  Backend (Rust)
     ├── Cargo.toml
-    ├── tauri.conf.json         Window, CSP, bundle and icon config
+    ├── tauri.conf.json         Window, CSP, bundle, icon and updater config
+    ├── tauri.updater.conf.json Turns on signed update artifacts (used by the release workflow)
+    ├── license_public_key.txt  Licence public key (written by npm run setup-keys)
+    ├── capabilities/           Window permissions (dialog, WhatsApp links, updater, restart)
     ├── icons/                  App icons for Windows (.ico), macOS (.icns), Linux/Store PNGs, plus the source app-icon.png/.svg
     ├── migrations/
     │   ├── 001_initial.sql     Original eatery schema
     │   ├── 002_universal.sql   Universal multi-user upgrade (runs once, preserves data)
-    │   └── 003_recovery.sql    Recovery key, security questions, security events
+    │   ├── 003_recovery.sql    Recovery key, security questions, security events
+    │   └── 004_v2.sql          Packs, wholesale, returns, shifts, expenses, suppliers, purchases, batches, recipes, held sales, flocks
     └── src/
         ├── lib.rs              App state, command registration, print
         ├── db.rs               Connection, WAL, versioned migrations, helpers
@@ -153,8 +215,14 @@ estock-manager/
         ├── recovery.rs         Recovery key, security questions, forgot password, create owner
         ├── templates.rs        Business templates and sample inventory
         ├── inventory.rs        Items, categories, stock movements, payment methods
-        ├── sales.rs            Receipts, payments, credit, voids, pickup tracking, customers
-        ├── reports.rs          Dashboard, sales report, CSV save, backup
+        ├── sales.rs            Receipts, packs/wholesale, recipes, payments, voids, returns, held sales, customers, statements
+        ├── shifts.rs           Cash shifts and Z reports
+        ├── expenses.rs         Expense book
+        ├── purchases.rs        Suppliers, purchases, supplier payments
+        ├── flocks.rs           Broiler flocks and metrics
+        ├── license.rs          Install ID, trial, Ed25519 licence keys
+        ├── backup.rs           Automatic and manual backups
+        ├── reports.rs          Dashboard, sales report (returns, expenses, net profit), CSV save
         ├── settings.rs         Validated settings, branding
         └── email.rs            SMTP (Gmail and others), HTML receipt email
 ```
@@ -165,6 +233,9 @@ estock-manager/
 - Every sale, stock change, void and payment runs in a single SQLite transaction.
 - All SQL uses bound parameters. All user text is HTML-escaped before display, and CSV exports neutralise spreadsheet formulas.
 - The window runs under a strict Content Security Policy. Fonts are bundled, so nothing loads from the internet.
+- Licence keys are verified offline with an embedded Ed25519 public key; the private key never ships. The trial start is stored in two places and a clock-rollback guard stops trial extension by changing the date.
+- Updates are accepted only when signed with the release key (minisign), and are downloaded over HTTPS from GitHub Releases.
+- WhatsApp links are the only URLs the app may open (`https://wa.me/*`), plus the project's GitHub page.
 - SMTP credentials are stored in the local database, readable only through the Owner role in the app. Protect the Windows/macOS user account with a password, use a dedicated sending mailbox, and keep backups somewhere safe, since they contain your data.
 
 ## Account recovery (offline)

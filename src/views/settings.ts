@@ -4,11 +4,14 @@ import { icon } from '../lib/icons';
 import { printHtml, receiptMarkup } from '../lib/receipt';
 import { applyTheme, contrast, PRESETS } from '../lib/theme';
 import { store } from '../store';
-import type { PaymentMethod, Receipt } from '../types';
+import type { BackupStatus, PaymentMethod, Receipt } from '../types';
+import { activationDialog, licence } from '../lib/license-ui';
+import { appVersion, checkForUpdate, installUpdate } from '../lib/updater';
+import { dateLabel, relativeDay } from '../lib/format';
 import type { ViewCtx } from './shell';
 import { questionFields, readQuestions, wireQuestionFields } from './recovery-ui';
 
-type Section = 'business' | 'receipts' | 'selling' | 'appearance' | 'email' | 'payments' | 'type' | 'security' | 'backup' | 'account';
+type Section = 'business' | 'receipts' | 'selling' | 'appearance' | 'email' | 'payments' | 'type' | 'security' | 'backup' | 'licence' | 'updates' | 'account';
 const SECTIONS: Array<{ key: Section; label: string; icon: string; owner: boolean }> = [
   { key: 'business', label: 'Business profile', icon: 'store', owner: true },
   { key: 'receipts', label: 'Receipts & tax', icon: 'receipt', owner: true },
@@ -19,6 +22,8 @@ const SECTIONS: Array<{ key: Section; label: string; icon: string; owner: boolea
   { key: 'type', label: 'Business type', icon: 'layers', owner: true },
   { key: 'security', label: 'Security & recovery', icon: 'shield', owner: true },
   { key: 'backup', label: 'Backup', icon: 'download', owner: true },
+  { key: 'licence', label: 'Licence', icon: 'key', owner: true },
+  { key: 'updates', label: 'Updates', icon: 'refresh', owner: true },
   { key: 'account', label: 'My account', icon: 'key', owner: false },
 ];
 
@@ -53,7 +58,7 @@ export async function render(ctx: ViewCtx) {
     // Leaving the colour section without saving restores the saved theme.
     applyTheme(store.settings.theme_primary, store.settings.theme_secondary, store.settings.theme_mode);
     body.innerHTML = '';
-    await ({ business, receipts, selling, appearance, email, payments, type: businessType, security, backup, account } as Record<Section, (b: HTMLElement, c: ViewCtx) => Promise<void> | void>)[section](body, ctx);
+    await ({ business, receipts, selling, appearance, email, payments, type: businessType, security, backup, licence: licenceSection, updates, account } as Record<Section, (b: HTMLElement, c: ViewCtx) => Promise<void> | void>)[section](body, ctx);
   };
   ctx.main.addEventListener('click', (e) => {
     const b = (e.target as HTMLElement).closest<HTMLElement>('[data-sec]');
@@ -141,14 +146,14 @@ function shrinkImage(file: File, max: number): Promise<string> {
 
 function sampleReceipt(): Receipt {
   const items = (store.products.filter((p) => p.kind !== 'material').slice(0, 3));
-  const lines = items.length ? items.map((p, i) => ({ product_name: p.name, product_kind: p.kind, unit: p.unit, quantity: i + 1, unit_price_kobo: p.selling_price_kobo, line_total_kobo: p.selling_price_kobo * (i + 1) }))
-    : [{ product_name: 'Sample item', product_kind: 'product' as const, unit: 'piece', quantity: 2, unit_price_kobo: 250000, line_total_kobo: 500000 }];
+  const lines = items.length ? items.map((p, i) => ({ id: i + 1, returned_qty: 0, sold_as: '', product_name: p.name, product_kind: p.kind, unit: p.unit, quantity: i + 1, unit_price_kobo: p.selling_price_kobo, line_total_kobo: p.selling_price_kobo * (i + 1) }))
+    : [{ id: 1, returned_qty: 0, sold_as: '', product_name: 'Sample item', product_kind: 'product' as const, unit: 'piece', quantity: 2, unit_price_kobo: 250000, line_total_kobo: 500000 }];
   const subtotal = lines.reduce((a, l) => a + l.line_total_kobo, 0);
   const rate = store.flag('tax_enabled') ? Number(store.settings.tax_rate || 0) : 0;
   const tax = Math.round((subtotal * rate) / 100);
   return { id: 0, receipt_no: `${store.settings.receipt_prefix || 'RCP'}-2610-00042`, customer_id: null, customer_name: 'Mrs Ekaette Bassey', customer_phone: '', customer_email: '', cashier_name: auth.session!.full_name,
     subtotal_kobo: subtotal, discount_kobo: 0, tax_kobo: tax, total_kobo: subtotal + tax, amount_paid_kobo: subtotal + tax, change_kobo: 0, balance_kobo: 0, payment_status: 'paid', fulfilment_status: 'none',
-    collection_date: '', note: '', void_reason: '', voided_by: '', created_at: new Date().toISOString().slice(0, 19).replace('T', ' '), items: lines,
+    collection_date: '', note: '', void_reason: '', voided_by: '', created_at: new Date().toISOString().slice(0, 19).replace('T', ' '), items: lines, returned_kobo: 0, refunded_kobo: 0, returns: [],
     payments: [{ method: 'Bank transfer', amount_kobo: subtotal + tax, reference: '', received_by: '', created_at: '' }] };
 }
 
@@ -198,6 +203,15 @@ function selling(body: HTMLElement, ctx: ViewCtx) {
         ${check('allow_price_override', 'Let cashiers change prices on a sale', 'Useful for farm produce, bulk buyers and negotiated prices. Managers can always change prices.')}
         ${check('allow_negative_stock', 'Allow selling when stock shows zero', 'Keep this off unless you sell before recording deliveries. Counts can go below zero.')}
         ${check('track_collection', 'Track orders for pickup', 'Each receipt gets In progress, Ready and Collected stages with a collection date. Ideal for dry cleaning, tailoring and repairs.')}
+        ${check('require_shift', 'Cashiers must open a shift before selling', 'They count the float at the start and the cash at the end. Any shortage shows under Shifts & cash-up.')}
+      </fieldset>
+      <fieldset class="subtle stack"><legend>Extra features</legend>
+        ${check('feature_recipes', 'Recipes for meals and services', 'Selling a meal takes its ingredients (rice, oil, chicken…) out of kitchen stock and works out its true cost.')}
+        ${check('feature_flocks', 'Broiler flock tracking', 'Adds the Flocks page: deaths, feed, weights, costs and profit for each batch of birds.')}
+        <div class="grid-2">
+          <label class="field"><span>Warn about expiry this many days ahead</span><input name="expiry_warn_days" type="number" min="1" max="365" value="${val('expiry_warn_days') || '30'}"></label>
+          <label class="field"><span>WhatsApp country code</span><span class="input-affix"><span class="affix">+</span><input name="whatsapp_country_code" inputmode="numeric" maxlength="4" value="${val('whatsapp_country_code') || '234'}"></span><small>Turns 0803… into +234 803… when sending receipts.</small></label>
+        </div>
       </fieldset>
       <fieldset class="subtle stack"><legend>Wording</legend>
         <div class="grid-3">
@@ -213,7 +227,8 @@ function selling(body: HTMLElement, ctx: ViewCtx) {
   form.addEventListener('submit', (e) => {
     e.preventDefault();
     const v = formValues(form);
-    save({ allow_price_override: v.allow_price_override, allow_negative_stock: v.allow_negative_stock, track_collection: v.track_collection, label_item: v.label_item || 'Item', label_items: v.label_items || 'Items', label_customer: v.label_customer || 'Customer' }, $('.btn-primary', form) as HTMLButtonElement, ctx.refreshChrome);
+    save({ allow_price_override: v.allow_price_override, allow_negative_stock: v.allow_negative_stock, track_collection: v.track_collection, require_shift: v.require_shift,
+      feature_recipes: v.feature_recipes, feature_flocks: v.feature_flocks, expiry_warn_days: v.expiry_warn_days || '30', whatsapp_country_code: v.whatsapp_country_code || '234', label_item: v.label_item || 'Item', label_items: v.label_items || 'Items', label_customer: v.label_customer || 'Customer' }, $('.btn-primary', form) as HTMLButtonElement, ctx.refreshChrome);
   });
 }
 
@@ -399,14 +414,94 @@ async function businessType(body: HTMLElement, ctx: ViewCtx) {
 
 // ---------------------------------------------------------------- backup
 
-function backup(body: HTMLElement) {
-  body.innerHTML = `${head('Backup', 'Everything is stored on this computer only. Make a copy regularly and keep it somewhere safe, such as a flash drive or Google Drive.')}
+async function backup(body: HTMLElement) {
+  const st = await call<BackupStatus>('backup_status');
+  body.innerHTML = `${head('Backup', 'Everything is stored on this computer only. eStock Manager copies it automatically once a day, and you can make a copy any time.')}
     <div class="form-narrow stack">
-      <div class="callout callout-info">${icon('shield', 18)}<div><b>Back up at least once a week.</b><p>If this computer is stolen, damaged or reformatted, a recent backup is the only way to get your sales and stock back.</p></div></div>
-      <div><button class="btn btn-primary" data-backup>${icon('download', 16)} Save a backup to Downloads</button></div>
-      <p class="muted small">To restore, close the app and replace <code>eatery-manager.sqlite3</code> in the app data folder with the backup file, renamed to that name. The README lists the folder for Windows and macOS.</p>
+      ${st.last_error ? `<div class="callout callout-warn"><div><b>The last automatic backup failed</b><span>${esc(st.last_error)}</span></div></div>` : ''}
+      <div class="figures figures-2"><div><span>Last backup</span><b>${st.last_auto ? esc(relativeDay(st.last_auto)) : 'Not yet'}</b></div><div><span>Backups kept</span><b>${st.files.length} of ${st.keep}</b></div></div>
+      <form class="stack" data-bform>
+        ${`<label class="check"><input type="checkbox" name="auto" ${st.auto ? 'checked' : ''}><span><b>Back up automatically every day</b><br><small class="muted">Runs in the background while the app is open. Older copies are deleted after the number you keep.</small></span></label>`}
+        <label class="field"><span>Backup folder</span><span class="input-affix"><input name="dir" value="${esc(st.dir === st.default_dir ? '' : st.dir)}" placeholder="${esc(st.default_dir)}" spellcheck="false"><button type="button" class="affix-btn" data-pick>Choose…</button></span>
+          <small>Pick a flash drive or a Google Drive / OneDrive folder on this computer to keep copies off the machine. Empty uses ${esc(st.default_dir)}.</small></label>
+        <label class="field"><span>Number of backups to keep</span><input name="keep" type="number" min="1" max="365" value="${st.keep}" class="w-num"></label>
+        <p class="form-error" role="alert" data-err></p>
+        <div class="form-actions start"><button class="btn btn-primary">Save backup settings</button><button type="button" class="btn btn-ghost" data-now>${icon('download', 16)} Back up now</button></div>
+      </form>
+      ${st.files.length ? `<details><summary>Backup files (${st.files.length})</summary><ul class="history">${st.files.map((f) => `<li><span class="mono-ish">${esc(f.name)}<small class="muted block">${esc(f.modified)}</small></span><b>${(f.size / 1048576).toFixed(1)} MB</b></li>`).join('')}</ul></details>` : ''}
+      <p class="muted small">To restore: close the app, then replace <code>eatery-manager.sqlite3</code> in the app data folder with a backup file renamed to that name. The guide (How to → Backup) shows the folder for Windows and Mac.</p>
     </div>`;
-  $<HTMLButtonElement>('[data-backup]', body)!.addEventListener('click', (e) => withBusy(e.currentTarget as HTMLButtonElement, async () => toast(`Backup saved: ${await call<string>('backup_database')}`)));
+  const form = $<HTMLFormElement>('[data-bform]', body)!;
+  $('[data-pick]', body)!.addEventListener('click', async () => {
+    try {
+      const { open } = await import('@tauri-apps/plugin-dialog');
+      const dir = await open({ directory: true, multiple: false, title: 'Choose a backup folder' });
+      if (typeof dir === 'string') (form.elements.namedItem('dir') as HTMLInputElement).value = dir;
+    } catch (x) { toast(`Folder picker unavailable: ${errText(x)}. Type the folder path instead.`, 'error'); }
+  });
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const v = formValues(form);
+    withBusy($<HTMLButtonElement>('.btn-primary', form), async () => {
+      try { await call('save_backup_settings', { input: { auto: v.auto === '1', dir: v.dir.trim(), keep: Number(v.keep) || 14 } }); }
+      catch (x) { $('[data-err]', form)!.textContent = errText(x); return; }
+      toast('Backup settings saved'); await backup(body);
+    });
+  });
+  $<HTMLButtonElement>('[data-now]', body)!.addEventListener('click', (e) => withBusy(e.currentTarget as HTMLButtonElement, async () => {
+    toast(`Backup saved: ${await call<string>('backup_now')}`); await backup(body);
+  }));
+}
+
+// ---------------------------------------------------------------- licence
+
+async function licenceSection(body: HTMLElement) {
+  const s = await licence.refresh();
+  if (!s) { body.innerHTML = `${head('Licence', '')}<p class="form-error">Licence details could not be read.</p>`; return; }
+  const state = s.state === 'licensed' ? `<span class="pill pill-ok">Activated</span>` : s.state === 'trial' ? `<span class="pill pill-info">Free trial</span>` : `<span class="pill pill-bad">Not active</span>`;
+  body.innerHTML = `${head('Licence', 'Every computer needs its own licence key. Keys are made by your eStock Manager provider for one Install ID and do not work on any other computer.')}
+    <div class="form-narrow stack">
+      <div class="figures figures-3"><div><span>Status</span><b>${state}</b></div>
+        <div><span>${s.state === 'licensed' ? 'Activated on' : 'Trial'}</span><b>${s.state === 'licensed' ? esc(dateLabel(s.licensed_since)) : `${s.trial_days_left} of ${s.trial_days} days left`}</b></div>
+        <div><span>Valid until</span><b>${s.state === 'licensed' ? (s.expires_on ? esc(dateLabel(s.expires_on)) : 'No end date') : '—'}</b></div></div>
+      <p class="muted">${esc(s.message)}</p>
+      <div class="install-id"><span class="field-label">This computer's Install ID</span><div class="install-id-row"><code>${esc(s.install_id)}</code></div></div>
+      <div><button class="btn ${s.state === 'licensed' ? 'btn-ghost' : 'btn-primary'}" data-activate>${icon('key', 16)} ${s.state === 'licensed' ? 'Enter a new key' : 'Activate'}</button></div>
+    </div>`;
+  $('[data-activate]', body)!.addEventListener('click', () => activationDialog(s, () => licenceSection(body)));
+}
+
+// ---------------------------------------------------------------- updates
+
+async function updates(body: HTMLElement) {
+  const version = await appVersion();
+  body.innerHTML = `${head('Updates', 'New versions are published by your provider. eStock Manager checks when an owner or manager signs in, and installs only updates signed by the provider.')}
+    <div class="form-narrow stack">
+      <div class="figures figures-2"><div><span>This version</span><b>${esc(version || 'Unknown')}</b></div><div><span>Status</span><b data-ustate>Checking…</b></div></div>
+      <div data-uout></div>
+      <div class="form-actions start"><button class="btn btn-ghost" data-check>${icon('refresh', 16)} Check again</button></div>
+      <p class="muted small">Your data stays in place during an update. A backup is still a good idea first (Settings → Backup).</p>
+    </div>`;
+  const out = $('[data-uout]', body)!, stateEl = $('[data-ustate]', body)!;
+  const run = async () => {
+    stateEl.textContent = 'Checking…'; out.innerHTML = '';
+    try {
+      const u = await checkForUpdate();
+      if (!u) { stateEl.textContent = 'Up to date'; return; }
+      stateEl.innerHTML = `<span class="warn-text">${esc(u.version)} available</span>`;
+      out.innerHTML = `<div class="callout callout-info">${icon('refresh', 18)}<div><b>eStock Manager ${esc(u.version)}</b>${u.body ? `<span class="pre-wrap">${esc(u.body)}</span>` : ''}<div><button class="btn btn-primary" data-install>Download and install</button></div><span class="muted small" data-prog></span></div></div>`;
+      $<HTMLButtonElement>('[data-install]', out)!.addEventListener('click', (e) => withBusy(e.currentTarget as HTMLButtonElement, async () => {
+        const prog = $('[data-prog]', out)!;
+        prog.textContent = 'Downloading…';
+        await installUpdate(u, (pct) => { prog.textContent = pct === null ? 'Downloading…' : pct >= 100 ? 'Installing. The app will restart…' : `Downloading… ${pct}%`; });
+      }));
+    } catch (x) {
+      stateEl.textContent = 'Could not check';
+      out.innerHTML = `<p class="muted small">${esc(errText(x))}. Check the internet connection and try again.</p>`;
+    }
+  };
+  $('[data-check]', body)!.addEventListener('click', run);
+  run();
 }
 
 // ---------------------------------------------------------------- account

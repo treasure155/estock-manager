@@ -56,6 +56,7 @@ impl Session {
 
 /// Validates the token, refreshes its idle timer and enforces the minimum role.
 pub fn require(state: &tauri::State<'_, AppState>, token: &str, min_role: Role) -> Result<Session, String> {
+    crate::license::require_active(state)?;
     let mut sessions = state.sessions.lock().map_err(|_| "Session lock was poisoned".to_string())?;
     let expired = match sessions.get(token) {
         Some(s) => s.last_seen.elapsed() > SESSION_IDLE_TIMEOUT,

@@ -8,7 +8,7 @@ use tauri::Manager;
 /// installations of the earlier Eatery Manager upgrade in place.
 pub const DB_FILE: &str = "eatery-manager.sqlite3";
 #[cfg_attr(not(test), allow(dead_code))]
-pub const SCHEMA_VERSION: i64 = 3;
+pub const SCHEMA_VERSION: i64 = 4;
 
 pub fn db_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
@@ -34,46 +34,46 @@ pub fn configure(conn: &Connection) -> Result<(), String> {
 }
 
 /// Applies migrations in order. 001 is idempotent (CREATE IF NOT EXISTS) and
-/// always runs first; later migrations are gated on `PRAGMA user_version`.
+/// runs only on a fresh database; later migrations are gated on `PRAGMA user_version`.
 pub fn migrate(conn: &Connection) -> Result<(), String> {
-    let version: i64 = conn
-        .query_row("PRAGMA user_version", [], |r| r.get(0))
-        .map_err(|e| e.to_string())?;
-
+    let version = user_version(conn)?;
     if version < 2 {
         conn.execute_batch(include_str!("../migrations/001_initial.sql"))
             .map_err(|e| format!("Database initialization failed: {e}"))?;
-        // Table rebuilds require foreign keys off; this PRAGMA is a no-op inside
-        // a transaction, so it is toggled around the transaction.
-        conn.execute_batch("PRAGMA foreign_keys = OFF;").map_err(|e| e.to_string())?;
-        let result = (|| -> Result<(), String> {
-            conn.execute_batch("BEGIN IMMEDIATE;").map_err(|e| e.to_string())?;
-            if let Err(e) = conn.execute_batch(include_str!("../migrations/002_universal.sql")) {
-                let _ = conn.execute_batch("ROLLBACK;");
-                return Err(format!("Upgrade to schema 2 failed: {e}"));
-            }
-            let violations: i64 = conn
-                .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |r| r.get(0))
-                .map_err(|e| e.to_string())?;
-            if violations > 0 {
-                let _ = conn.execute_batch("ROLLBACK;");
-                return Err(format!("Upgrade aborted: {violations} foreign key problems found"));
-            }
-            conn.execute_batch("PRAGMA user_version = 2; COMMIT;").map_err(|e| e.to_string())
-        })();
-        conn.execute_batch("PRAGMA foreign_keys = ON;").map_err(|e| e.to_string())?;
-        result?;
+        run_migration(conn, include_str!("../migrations/002_universal.sql"), 2, true)?;
     }
-    let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).map_err(|e| e.to_string())?;
-    if version < 3 {
-        conn.execute_batch("BEGIN IMMEDIATE;").map_err(|e| e.to_string())?;
-        if let Err(e) = conn.execute_batch(include_str!("../migrations/003_recovery.sql")) {
-            let _ = conn.execute_batch("ROLLBACK;");
-            return Err(format!("Upgrade to schema 3 failed: {e}"));
-        }
-        conn.execute_batch("PRAGMA user_version = 3; COMMIT;").map_err(|e| e.to_string())?;
+    if user_version(conn)? < 3 {
+        run_migration(conn, include_str!("../migrations/003_recovery.sql"), 3, false)?;
+    }
+    if user_version(conn)? < 4 {
+        run_migration(conn, include_str!("../migrations/004_v2.sql"), 4, true)?;
     }
     Ok(())
+}
+
+fn user_version(conn: &Connection) -> Result<i64, String> {
+    conn.query_row("PRAGMA user_version", [], |r| r.get(0)).map_err(|e| e.to_string())
+}
+
+/// Runs one migration in a transaction. Table rebuilds need foreign keys off;
+/// that PRAGMA is a no-op inside a transaction, so it is toggled around it.
+fn run_migration(conn: &Connection, sql: &str, version: i64, rebuilds_tables: bool) -> Result<(), String> {
+    if rebuilds_tables { conn.execute_batch("PRAGMA foreign_keys = OFF;").map_err(|e| e.to_string())?; }
+    let result = (|| -> Result<(), String> {
+        conn.execute_batch("BEGIN IMMEDIATE;").map_err(|e| e.to_string())?;
+        if let Err(e) = conn.execute_batch(sql) {
+            let _ = conn.execute_batch("ROLLBACK;");
+            return Err(format!("Upgrade to schema {version} failed: {e}"));
+        }
+        let violations: i64 = conn.query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |r| r.get(0)).map_err(|e| e.to_string())?;
+        if violations > 0 {
+            let _ = conn.execute_batch("ROLLBACK;");
+            return Err(format!("Upgrade aborted: {violations} foreign key problems found"));
+        }
+        conn.execute_batch(&format!("PRAGMA user_version = {version}; COMMIT;")).map_err(|e| e.to_string())
+    })();
+    if rebuilds_tables { conn.execute_batch("PRAGMA foreign_keys = ON;").map_err(|e| e.to_string())?; }
+    result
 }
 
 pub fn setting(conn: &Connection, key: &str) -> Result<String, String> {

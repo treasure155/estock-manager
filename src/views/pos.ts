@@ -3,11 +3,15 @@ import { $, $$, confirmDialog, debounce, errText, esc, modal, toast, withBusy } 
 import { money, nairaInput, qty, toKobo } from '../lib/format';
 import { icon } from '../lib/icons';
 import { printReceipt, receiptMarkup } from '../lib/receipt';
+import { receiptText, shareWhatsApp } from '../lib/whatsapp';
 import { store } from '../store';
-import type { Customer, Product, Receipt } from '../types';
+import type { Customer, HeldSale, Product, Receipt, ShiftReport } from '../types';
 import type { ViewCtx } from './shell';
+import { openShiftDialog } from './shifts';
 
-interface Line { product: Product; qty: number; price: number }
+type SellAs = 'unit' | 'pack';
+/** `override` is a price typed at the till; otherwise the list, pack or wholesale price applies. */
+interface Line { product: Product; qty: number; sellAs: SellAs; override: number | null }
 interface Pick { id: number | null; name: string; phone: string; email: string }
 
 // The sale in progress survives moving between pages.
@@ -16,37 +20,64 @@ let discount = 0;
 let customer: Pick | null = null;
 let activeCategory: number | 'all' = 'all';
 let query = '';
+let shift: ShiftReport | null = null;
+
+const hasPack = (p: Product) => !!p.pack_unit && p.pack_size > 1;
+const factor = (l: Line) => (l.sellAs === 'pack' ? l.product.pack_size : 1);
+const unitName = (l: Line) => (l.sellAs === 'pack' ? l.product.pack_unit : l.product.unit);
+const isWholesale = (l: Line) => l.sellAs === 'unit' && l.product.wholesale_price_kobo > 0 && l.product.wholesale_min_qty > 0 && l.qty + 1e-9 >= l.product.wholesale_min_qty;
+function listPrice(l: Line): number {
+  const p = l.product;
+  if (l.sellAs === 'pack') return p.pack_price_kobo > 0 ? p.pack_price_kobo : Math.round(p.selling_price_kobo * p.pack_size);
+  return isWholesale(l) ? p.wholesale_price_kobo : p.selling_price_kobo;
+}
+const price = (l: Line) => l.override ?? listPrice(l);
 
 const sellable = () => store.products.filter((p) => p.active && p.kind !== 'material');
 const canOverride = () => store.flag('allow_price_override') || auth.can('manager');
 const allowNegative = () => store.flag('allow_negative_stock');
 
 function totals() {
-  const subtotal = cart.reduce((a, l) => a + Math.round(l.price * l.qty), 0);
+  const subtotal = cart.reduce((a, l) => a + Math.round(price(l) * l.qty), 0);
   const d = Math.min(discount, subtotal);
   const rate = store.flag('tax_enabled') ? Number(store.settings.tax_rate || 0) : 0;
   const tax = rate > 0 ? Math.round(((subtotal - d) * rate) / 100) : 0;
   return { subtotal, discount: d, tax, total: subtotal - d + tax, count: cart.reduce((a, l) => a + l.qty, 0) };
 }
 
-function inCart(id: number) { return cart.filter((l) => l.product.id === id).reduce((a, l) => a + l.qty, 0); }
+/** Base units (pieces, plates, kg…) of an item already in the sale. */
+function inCart(id: number) { return cart.filter((l) => l.product.id === id).reduce((a, l) => a + l.qty * factor(l), 0); }
 
-function addProduct(p: Product, amount = 1): boolean {
-  if (p.track_stock && !allowNegative() && inCart(p.id) + amount > p.stock_qty + 1e-9) {
+function stockOk(p: Product, extraBase: number): boolean {
+  if (p.track_stock && !allowNegative() && inCart(p.id) + extraBase > p.stock_qty + 1e-9) {
     toast(p.stock_qty <= 0 ? `${p.name} is out of stock` : `Only ${qty(p.stock_qty)} ${p.unit} of ${p.name} in stock`, 'error');
     return false;
   }
-  const line = cart.find((l) => l.product.id === p.id && l.price === p.selling_price_kobo);
+  return true;
+}
+
+function addProduct(p: Product, amount = 1, sellAs: SellAs = 'unit'): boolean {
+  if (!stockOk(p, amount * (sellAs === 'pack' ? p.pack_size : 1))) return false;
+  const line = cart.find((l) => l.product.id === p.id && l.sellAs === sellAs && l.override === null);
   if (line) line.qty = Math.round((line.qty + amount) * 1000) / 1000;
-  else cart.push({ product: p, qty: amount, price: p.selling_price_kobo });
+  else cart.push({ product: p, qty: amount, sellAs, override: null });
   return true;
 }
 
 export async function render(ctx: ViewCtx) {
-  ctx.header('New sale', 'Tap items or scan barcodes, then take payment.', `<button class="btn btn-ghost" data-act="clear">${icon('trash', 16)} Clear sale</button>`);
-  await Promise.all([store.loadProducts(), store.loadCategories(), store.loadPaymentMethods()]);
+  const [, , , current] = await Promise.all([store.loadProducts(), store.loadCategories(), store.loadPaymentMethods(), call<ShiftReport | null>('current_shift').catch(() => null)]);
+  shift = current;
+  const drawHeader = (held = 0) => ctx.header('New sale', shift ? `Shift open since ${shift.opened_at.slice(11, 16)}` : store.flag('require_shift') ? 'Open your shift to start selling.' : 'Tap items or scan barcodes, then take payment.', `
+    <button class="btn btn-ghost" data-act="shift">${icon('cash', 16)} ${shift ? 'Shift' : 'Open shift'}</button>
+    <button class="btn btn-ghost" data-act="held">${icon('pause', 16)} Held sales${held ? ` <span class="count-badge">${held}</span>` : ''}</button>
+    <button class="btn btn-ghost" data-act="clear">${icon('trash', 16)} Clear</button>`);
+  let heldCount = 0;
+  const refreshHeld = async () => { heldCount = (await call<HeldSale[]>('list_held_sales').catch(() => [])).length; drawHeader(heldCount); };
+  drawHeader();
+  refreshHeld();
   // Drop cart lines whose item disappeared or changed since the last visit.
-  cart = cart.filter((l) => store.products.some((p) => p.id === l.product.id && p.active)).map((l) => ({ ...l, product: store.products.find((p) => p.id === l.product.id)! }));
+  cart = cart.filter((l) => store.products.some((p) => p.id === l.product.id && p.active)).map((l) => ({ ...l, product: store.products.find((p) => p.id === l.product.id)! }))
+    .filter((l) => l.sellAs === 'unit' || hasPack(l.product));
 
   const cats = store.categories.filter((c) => sellable().some((p) => p.category_id === c.id));
   ctx.main.innerHTML = `<div class="pos">
@@ -96,6 +127,7 @@ export async function render(ctx: ViewCtx) {
         ${n ? `<span class="tile-count" aria-label="${qty(n)} in sale">${qty(n)}</span>` : ''}
         <span class="tile-name">${esc(p.name)}</span>
         <span class="tile-foot"><b>${money(p.selling_price_kobo)}</b><small>${esc(stock)}</small></span>
+        ${hasPack(p) ? `<span class="tile-pack" data-addpack="${p.id}" aria-hidden="true" title="Add one ${esc(p.pack_unit)}">+ ${esc(p.pack_unit)} ${money(p.pack_price_kobo || Math.round(p.selling_price_kobo * p.pack_size), { whole: true })}</span>` : ''}
       </button>`;
     }).join('');
   };
@@ -111,16 +143,16 @@ export async function render(ctx: ViewCtx) {
       <div class="ticket-lines">
         ${cart.length ? cart.map((l, i) => `
           <div class="tline">
-            <div class="tline-top"><span class="tline-name">${esc(l.product.name)}</span><button class="tline-x" data-remove="${i}" aria-label="Remove ${esc(l.product.name)}">${icon('close', 14)}</button></div>
+            <div class="tline-top"><span class="tline-name">${esc(l.product.name)}${isWholesale(l) && l.override === null ? ' <span class="pill pill-info">Wholesale</span>' : ''}</span><button class="tline-x" data-remove="${i}" aria-label="Remove ${esc(l.product.name)}">${icon('close', 14)}</button></div>
             <div class="tline-bottom">
               <span class="stepper">
                 <button data-dec="${i}" aria-label="Decrease quantity">${icon('minus', 14)}</button>
                 <input data-qty="${i}" value="${qty(l.qty)}" inputmode="decimal" aria-label="Quantity of ${esc(l.product.name)}">
                 <button data-inc="${i}" aria-label="Increase quantity">${icon('plus', 14)}</button>
               </span>
-              <span class="tline-unit">${esc(l.product.unit)} ×</span>
-              ${canOverride() ? `<button class="tline-price is-editable" data-price="${i}" title="Change price">${money(l.price)}</button>` : `<span class="tline-price">${money(l.price)}</span>`}
-              <b class="tline-total">${money(Math.round(l.price * l.qty))}</b>
+              ${hasPack(l.product) ? `<button class="tline-unit is-toggle" data-toggle="${i}" title="Switch between ${esc(l.product.unit)} and ${esc(l.product.pack_unit)}">${esc(unitName(l))} ⇄</button>` : `<span class="tline-unit">${esc(unitName(l))} ×</span>`}
+              ${canOverride() ? `<button class="tline-price is-editable" data-price="${i}" title="Change price">${money(price(l))}</button>` : `<span class="tline-price">${money(price(l))}</span>`}
+              <b class="tline-total">${money(Math.round(price(l) * l.qty))}</b>
             </div>
           </div>`).join('') : `<div class="ticket-empty">${icon('barcode', 26)}<p>Tap an item or scan a barcode to start this sale.</p></div>`}
       </div>
@@ -131,7 +163,7 @@ export async function render(ctx: ViewCtx) {
         <div class="tsum tsum-total"><span>Total</span><span>${money(t.total)}</span></div>
       </div>`;
     actions.innerHTML = `<button class="btn btn-primary btn-xl btn-block" data-act="pay" ${cart.length ? '' : 'disabled'}>${icon('cash', 20)} Take payment<span class="btn-amount">${money(t.total)}</span></button>
-      <p class="ticket-hint"><kbd>Enter</kbd> adds a scanned item · <kbd>F9</kbd> takes payment</p>`;
+      <div class="ticket-row"><button class="btn btn-ghost btn-sm" data-act="hold" ${cart.length ? '' : 'disabled'}>${icon('pause', 15)} Hold this sale</button><p class="ticket-hint"><kbd>F9</kbd> pay · <kbd>F2</kbd> search</p></div>`;
   };
 
   const redraw = () => { drawTiles(); drawTicket(); };
@@ -190,10 +222,20 @@ export async function render(ctx: ViewCtx) {
       drawTiles(); return;
     }
     if (t.closest('[data-go-inventory]')) { ctx.go('inventory'); return; }
+    const addPack = t.closest<HTMLElement>('[data-addpack]');
+    if (addPack) { const p = store.products.find((x) => x.id === Number(addPack.dataset.addpack)); if (p && addProduct(p, 1, 'pack')) { redraw(); flash(p.id); } return; }
     const add = t.closest<HTMLElement>('[data-add]');
     if (add) { const p = store.products.find((x) => x.id === Number(add.dataset.add)); if (p && addProduct(p)) { redraw(); flash(p.id); } return; }
     const inc = t.closest<HTMLElement>('[data-inc]');
-    if (inc) { const l = cart[Number(inc.dataset.inc)]; if (addProduct(l.product)) redraw(); return; }
+    if (inc) { const l = cart[Number(inc.dataset.inc)]; if (stockOk(l.product, factor(l))) { l.qty = Math.round((l.qty + 1) * 1000) / 1000; redraw(); } return; }
+    const tog = t.closest<HTMLElement>('[data-toggle]');
+    if (tog) {
+      const l = cart[Number(tog.dataset.toggle)];
+      const next: SellAs = l.sellAs === 'pack' ? 'unit' : 'pack';
+      const delta = l.qty * ((next === 'pack' ? l.product.pack_size : 1) - factor(l));
+      if (delta <= 0 || stockOk(l.product, delta)) { l.sellAs = next; l.override = null; redraw(); }
+      return;
+    }
     const dec = t.closest<HTMLElement>('[data-dec]');
     if (dec) { const i = Number(dec.dataset.dec); cart[i].qty = Math.round((cart[i].qty - 1) * 1000) / 1000; if (cart[i].qty <= 0) cart.splice(i, 1); redraw(); return; }
     const rm = t.closest<HTMLElement>('[data-remove]');
@@ -203,7 +245,29 @@ export async function render(ctx: ViewCtx) {
     const act = t.closest<HTMLElement>('[data-act]')?.dataset.act;
     if (act === 'discount') editDiscount(redraw);
     if (act === 'customer') pickCustomer(drawTicket);
-    if (act === 'pay') checkout(() => { redraw(); search.focus(); });
+    if (act === 'pay') pay();
+    if (act === 'hold') holdSale(() => { redraw(); refreshHeld(); search.focus(); });
+  };
+  const pay = () => {
+    if (store.flag('require_shift') && !shift) {
+      openShiftDialog((s) => { shift = s; drawHeader(heldCount); checkout(() => { redraw(); search.focus(); }); });
+      return;
+    }
+    checkout(() => { redraw(); search.focus(); });
+  };
+  // Header buttons live outside the page element.
+  document.querySelector<HTMLElement>('[data-actions]')!.onclick = async (e) => {
+    const act = (e.target as HTMLElement).closest<HTMLElement>('[data-act]')?.dataset.act;
+    if (act === 'held') recallHeld(() => { redraw(); refreshHeld(); });
+    if (act === 'shift') {
+      if (shift) ctx.go('shifts');
+      else openShiftDialog((s) => { shift = s; drawHeader(heldCount); search.focus(); });
+    }
+    if (act === 'clear') {
+      if (!cart.length && !customer) return;
+      if (await confirmDialog({ title: 'Clear this sale?', message: 'All lines, the discount and the customer will be removed.', confirm: 'Clear sale', danger: true }) === null) return;
+      cart = []; discount = 0; customer = null; redraw(); search.focus();
+    }
   };
   ctx.main.onchange = (e) => {
     const input = (e.target as HTMLElement).closest<HTMLInputElement>('[data-qty]');
@@ -211,25 +275,20 @@ export async function render(ctx: ViewCtx) {
     const l = cart[Number(input.dataset.qty)];
     const v = Number(input.value.replace(',', '.'));
     if (!Number.isFinite(v) || v <= 0) { cart.splice(Number(input.dataset.qty), 1); redraw(); return; }
-    const others = inCart(l.product.id) - l.qty;
-    if (l.product.track_stock && !allowNegative() && others + v > l.product.stock_qty + 1e-9) {
+    const others = inCart(l.product.id) - l.qty * factor(l);
+    if (l.product.track_stock && !allowNegative() && others + v * factor(l) > l.product.stock_qty + 1e-9) {
       toast(`Only ${qty(l.product.stock_qty)} ${l.product.unit} of ${l.product.name} in stock`, 'error');
-      l.qty = Math.max(0, l.product.stock_qty - others);
+      l.qty = Math.max(0, Math.floor(((l.product.stock_qty - others) / factor(l)) * 1000) / 1000);
       if (l.qty <= 0) cart.splice(cart.indexOf(l), 1);
     } else l.qty = Math.round(v * 1000) / 1000;
     redraw();
   };
 
-  $('[data-act="clear"]')?.addEventListener('click', async () => {
-    if (!cart.length && !customer) return;
-    if (await confirmDialog({ title: 'Clear this sale?', message: 'All lines, the discount and the customer will be removed.', confirm: 'Clear sale', danger: true }) === null) return;
-    cart = []; discount = 0; customer = null; redraw(); search.focus();
-  });
 
   const onKey = (e: KeyboardEvent) => {
     if (!ctx.main.isConnected || !ctx.main.classList.contains('view-pos')) { document.removeEventListener('keydown', onKey); return; }
     if (document.body.classList.contains('has-modal')) return;
-    if (e.key === 'F9' && cart.length) { e.preventDefault(); checkout(() => { redraw(); search.focus(); }); }
+    if (e.key === 'F9' && cart.length) { e.preventDefault(); pay(); }
     if (e.key === 'F2') { e.preventDefault(); search.focus(); search.select(); }
   };
   document.addEventListener('keydown', onKey);
@@ -237,11 +296,64 @@ export async function render(ctx: ViewCtx) {
 
 function editPrice(line: Line, done: () => void) {
   const m = modal({ title: 'Change price', subtitle: line.product.name, size: 'sm', body: `<form class="stack">
-    <label class="field"><span>Price per ${esc(line.product.unit)}</span><span class="input-affix"><span class="affix">${esc(store.settings.currency_symbol || '₦')}</span><input name="price" inputmode="decimal" value="${nairaInput(line.price)}" required autofocus></span><small>List price is ${money(line.product.selling_price_kobo)}.</small></label>
+    <label class="field"><span>Price per ${esc(unitName(line))}</span><span class="input-affix"><span class="affix">${esc(store.settings.currency_symbol || '₦')}</span><input name="price" inputmode="decimal" value="${nairaInput(price(line))}" required autofocus></span><small>List price is ${money(listPrice(line))}.</small></label>
     <div class="form-actions"><button type="button" class="btn btn-ghost" data-reset>Use list price</button><button class="btn btn-primary">Apply</button></div></form>` });
   const form = m.el.querySelector('form')!;
-  $('[data-reset]', form)!.addEventListener('click', () => { line.price = line.product.selling_price_kobo; m.close(); done(); });
-  form.addEventListener('submit', (e) => { e.preventDefault(); const v = toKobo((form.elements.namedItem('price') as HTMLInputElement).value); if (v < 0) return; line.price = v; m.close(); done(); });
+  $('[data-reset]', form)!.addEventListener('click', () => { line.override = null; m.close(); done(); });
+  form.addEventListener('submit', (e) => { e.preventDefault(); const v = toKobo((form.elements.namedItem('price') as HTMLInputElement).value); if (v < 0) return; line.override = v === listPrice(line) ? null : v; m.close(); done(); });
+}
+
+// ---------------------------------------------------------------- held (parked) sales
+
+interface HeldCart { lines: Array<{ product_id: number; qty: number; sellAs: SellAs; override: number | null }>; discount: number; customer: Pick | null }
+
+function holdSale(done: () => void) {
+  const t = totals();
+  const m = modal({ title: 'Hold this sale', size: 'sm', body: `<form class="stack">
+    <p class="muted">Park the sale to serve someone else, then bring it back from <b>Held sales</b>. Stock is not taken until the sale is completed.</p>
+    <label class="field"><span>Name it</span><input name="label" required maxlength="60" autofocus placeholder="e.g. Table 4, Mrs Bello, Car 2" value="${esc(customer?.name ?? '')}"></label>
+    <div class="form-actions"><button type="button" class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-primary">${icon('pause', 16)} Hold</button></div></form>` });
+  const form = m.el.querySelector('form')!;
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const held: HeldCart = { lines: cart.map((l) => ({ product_id: l.product.id, qty: l.qty, sellAs: l.sellAs, override: l.override })), discount, customer };
+    withBusy(form.querySelector('.btn-primary'), async () => {
+      await call('hold_sale', { label: (form.elements.namedItem('label') as HTMLInputElement).value, cartJson: JSON.stringify(held), itemCount: t.count, totalKobo: t.total });
+      cart = []; discount = 0; customer = null;
+      toast('Sale held'); m.close(); done();
+    });
+  });
+}
+
+async function recallHeld(done: () => void) {
+  const rows = await call<HeldSale[]>('list_held_sales').catch((e) => { toast(errText(e), 'error'); return null; });
+  if (!rows) return;
+  const m = modal({ title: 'Held sales', size: 'md', body: rows.length ? `<ul class="pick-list">${rows.map((h) => `<li class="held-row">
+      <button data-resume="${h.id}"><b>${esc(h.label)}</b><span>${qty(h.item_count)} item${h.item_count === 1 ? '' : 's'} · ${money(h.total_kobo)} · ${esc(h.user_name)}, ${esc(h.created_at.slice(11, 16))}</span></button>
+      <button class="icon-btn" data-drop-held="${h.id}" aria-label="Delete held sale ${esc(h.label)}">${icon('trash', 16)}</button></li>`).join('')}</ul>`
+    : '<p class="muted pad">No held sales. Use “Hold this sale” on the ticket to park one.</p>' });
+  m.el.addEventListener('click', async (e) => {
+    const t = e.target as HTMLElement;
+    const drop = t.closest<HTMLElement>('[data-drop-held]');
+    if (drop) { await call('delete_held_sale', { id: Number(drop.dataset.dropHeld) }); m.close(); done(); recallHeld(done); return; }
+    const resume = t.closest<HTMLElement>('[data-resume]');
+    if (!resume) return;
+    if (cart.length && await confirmDialog({ title: 'Replace the current sale?', message: 'The sale on the ticket now will be cleared. Hold it first if you need it.', confirm: 'Replace' }) === null) return;
+    const h = rows.find((x) => x.id === Number(resume.dataset.resume))!;
+    const data = JSON.parse(h.cart_json) as HeldCart;
+    await store.loadProducts();
+    const missing: string[] = [];
+    cart = [];
+    for (const l of data.lines) {
+      const p = store.products.find((x) => x.id === l.product_id && x.active);
+      if (!p || (l.sellAs === 'pack' && !hasPack(p))) { missing.push(String(l.product_id)); continue; }
+      cart.push({ product: p, qty: l.qty, sellAs: l.sellAs, override: l.override });
+    }
+    discount = data.discount; customer = data.customer;
+    await call('delete_held_sale', { id: h.id });
+    if (missing.length) toast(`${missing.length} item(s) are no longer available and were left out`, 'info');
+    m.close(); done();
+  });
 }
 
 function editDiscount(done: () => void) {
@@ -413,7 +525,7 @@ function checkout(after: () => void) {
     const r = await call<Receipt>('create_receipt', { input: {
       customer_id: customer?.id ?? null, customer_name: customer?.name ?? '', customer_phone: customer?.phone ?? '', customer_email: customer?.email ?? '',
       discount_kobo: t.discount, note: ($('[data-note]', m.el) as HTMLInputElement).value, collection_date: ($('[data-collection]', m.el) as HTMLInputElement | null)?.value ?? '',
-      items: cart.map((l) => ({ product_id: l.product.id, quantity: l.qty, unit_price_kobo: l.price })),
+      items: cart.map((l) => ({ product_id: l.product.id, quantity: l.qty, unit_price_kobo: l.override, sell_as: l.sellAs === 'pack' ? 'pack' : null })),
       payments: pays.filter((p) => p.amount > 0).map((p) => ({ method: p.method, amount_kobo: p.amount, reference: p.reference })),
     } }).catch((e) => { err.textContent = errText(e); return null; });
     if (!r) return;
@@ -432,12 +544,14 @@ export function showReceipt(r: Receipt, opts: { fresh?: boolean; onChange?: () =
     <div class="stack receipt-side">
       ${opts.fresh ? `<div class="done-mark">${icon('check', 22)}<div><b>${money(r.total_kobo)}</b><span>${r.change_kobo ? `Give ${money(r.change_kobo)} change` : r.balance_kobo ? `${money(r.balance_kobo)} still owed` : 'Paid in full'}</span></div></div>` : ''}
       <button class="btn btn-primary btn-lg btn-block" data-print>${icon('print', 18)} Print receipt</button>
+      <button class="btn btn-ghost btn-block" data-wa>${icon('chat', 17)} Send on WhatsApp</button>
       <form class="stack email-form" data-email>
         <label class="field"><span>Email the receipt</span><span class="input-affix"><input type="email" name="to" placeholder="customer@example.com" value="${esc(r.customer_email)}" required maxlength="254"><button class="affix-btn" type="submit">${icon('mail', 16)} Send</button></span></label>
       </form>
       ${opts.fresh ? `<button class="btn btn-ghost btn-block" data-close>${icon('plus', 16)} Start next sale</button>` : ''}
     </div></div>` });
   $('[data-print]', m.el)!.addEventListener('click', () => printReceipt(r));
+  $('[data-wa]', m.el)!.addEventListener('click', () => shareWhatsApp(r.customer_phone, receiptText(r)));
   const form = $<HTMLFormElement>('[data-email]', m.el)!;
   form.addEventListener('submit', (e) => {
     e.preventDefault();

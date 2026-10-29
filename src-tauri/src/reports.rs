@@ -1,4 +1,4 @@
-//! Dashboard figures, sales reports, file exports and database backup.
+//! Dashboard figures, sales reports and file exports.
 
 use crate::{auth::{self, Role}, AppState};
 use rusqlite::{params, Connection};
@@ -25,6 +25,10 @@ pub struct Dashboard {
     product_count: i64,
     low_stock_count: i64,
     low_stock: Vec<LowStock>,
+    expiring_count: i64,
+    expired_count: i64,
+    today_expenses_kobo: i64,
+    today_returns_kobo: i64,
     last_7_days: Vec<DayPoint>,
     /// Scope: "all" for managers, "mine" for cashiers.
     scope: String,
@@ -41,12 +45,19 @@ pub fn dashboard(state: tauri::State<'_, AppState>, session_token: String) -> Re
     let mine: Option<i64> = if me.role < Role::Manager { Some(me.user_id) } else { None };
     let live = "payment_status<>'void' AND (?1 IS NULL OR cashier_id=?1)";
     let today_sales_kobo = scalar(&conn, &format!("SELECT COALESCE(SUM(total_kobo),0) FROM receipts WHERE {live} AND date(created_at,'localtime')=date('now','localtime')"), [mine])?;
+    let today_returns_kobo = scalar(&conn, "SELECT COALESCE(SUM(t.value_kobo),0) FROM returns t JOIN receipts r ON r.id=t.receipt_id WHERE (?1 IS NULL OR r.cashier_id=?1) AND date(t.created_at,'localtime')=date('now','localtime')", [mine])?;
+    let today_sales_kobo = today_sales_kobo - today_returns_kobo;
+    let today_expenses_kobo = if mine.is_none() { scalar(&conn, "SELECT COALESCE(SUM(amount_kobo),0) FROM expenses WHERE expense_date=date('now','localtime')", [])? } else { 0 };
+    let warn_days: i64 = crate::db::setting(&conn, "expiry_warn_days")?.parse().unwrap_or(30);
+    let expiring_count = scalar(&conn, "SELECT COUNT(*) FROM stock_batches b JOIN products p ON p.id=b.product_id WHERE p.active=1 AND b.quantity_left>0 AND b.expiry_date>=date('now','localtime') AND b.expiry_date<=date('now','localtime','+'||?1||' days')", [warn_days])?;
+    let expired_count = scalar(&conn, "SELECT COUNT(*) FROM stock_batches b JOIN products p ON p.id=b.product_id WHERE p.active=1 AND b.quantity_left>0 AND b.expiry_date<date('now','localtime')", [])?;
     let today_receipts = scalar(&conn, &format!("SELECT COUNT(*) FROM receipts WHERE {live} AND date(created_at,'localtime')=date('now','localtime')"), [mine])?;
     let yesterday_sales_kobo = scalar(&conn, &format!("SELECT COALESCE(SUM(total_kobo),0) FROM receipts WHERE {live} AND date(created_at,'localtime')=date('now','localtime','-1 day')"), [mine])?;
     let today_collected_kobo = scalar(&conn,
         "SELECT COALESCE(SUM(p.amount_kobo),0) FROM receipt_payments p JOIN receipts r ON r.id=p.receipt_id
-         WHERE r.payment_status<>'void' AND (?1 IS NULL OR r.cashier_id=?1) AND date(p.created_at,'localtime')=date('now','localtime')", [mine])?;
-    let outstanding_kobo = scalar(&conn, "SELECT COALESCE(SUM(total_kobo-amount_paid_kobo),0) FROM receipts WHERE payment_status IN ('partial','unpaid') AND (?1 IS NULL OR cashier_id=?1)", [mine])?;
+         WHERE r.payment_status<>'void' AND (?1 IS NULL OR r.cashier_id=?1) AND date(p.created_at,'localtime')=date('now','localtime')", [mine])?
+        - scalar(&conn, "SELECT COALESCE(SUM(t.refund_paid_kobo),0) FROM returns t JOIN receipts r ON r.id=t.receipt_id WHERE (?1 IS NULL OR r.cashier_id=?1) AND date(t.created_at,'localtime')=date('now','localtime')", [mine])?;
+    let outstanding_kobo = scalar(&conn, &format!("SELECT COALESCE(SUM({}),0) FROM receipts r WHERE r.payment_status IN ('partial','unpaid') AND (?1 IS NULL OR r.cashier_id=?1)", crate::sales::OWED_SQL), [mine])?;
     let owing_receipts = scalar(&conn, "SELECT COUNT(*) FROM receipts WHERE payment_status IN ('partial','unpaid') AND (?1 IS NULL OR cashier_id=?1)", [mine])?;
     let pending_collections = scalar(&conn, "SELECT COUNT(*) FROM receipts WHERE fulfilment_status='pending' AND payment_status<>'void' AND (?1 IS NULL OR cashier_id=?1)", [mine])?;
     let ready_collections = scalar(&conn, "SELECT COUNT(*) FROM receipts WHERE fulfilment_status='ready' AND payment_status<>'void' AND (?1 IS NULL OR cashier_id=?1)", [mine])?;
@@ -58,13 +69,13 @@ pub fn dashboard(state: tauri::State<'_, AppState>, session_token: String) -> Re
     let mut stmt = conn
         .prepare(
             "WITH RECURSIVE days(d) AS (SELECT date('now','localtime','-6 days') UNION ALL SELECT date(d,'+1 day') FROM days WHERE d < date('now','localtime'))
-             SELECT d, COALESCE((SELECT SUM(total_kobo) FROM receipts WHERE payment_status<>'void' AND (?1 IS NULL OR cashier_id=?1) AND date(created_at,'localtime')=d),0),
+             SELECT d, COALESCE((SELECT SUM(total_kobo-returned_kobo) FROM receipts WHERE payment_status<>'void' AND (?1 IS NULL OR cashier_id=?1) AND date(created_at,'localtime')=d),0),
                        (SELECT COUNT(*) FROM receipts WHERE payment_status<>'void' AND (?1 IS NULL OR cashier_id=?1) AND date(created_at,'localtime')=d)
              FROM days ORDER BY d",
         )
         .map_err(|e| e.to_string())?;
     let last_7_days = stmt.query_map([mine], |r| Ok(DayPoint { date: r.get(0)?, total_kobo: r.get(1)?, receipts: r.get(2)? })).map_err(|e| e.to_string())?.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?;
-    Ok(Dashboard { today_sales_kobo, today_receipts, today_collected_kobo, yesterday_sales_kobo, outstanding_kobo, owing_receipts, pending_collections, ready_collections, product_count, low_stock_count, low_stock, last_7_days, scope: if mine.is_some() { "mine".into() } else { "all".into() } })
+    Ok(Dashboard { today_sales_kobo, today_receipts, today_collected_kobo, yesterday_sales_kobo, outstanding_kobo, owing_receipts, pending_collections, ready_collections, product_count, low_stock_count, low_stock, expiring_count, expired_count, today_expenses_kobo, today_returns_kobo, last_7_days, scope: if mine.is_some() { "mine".into() } else { "all".into() } })
 }
 
 #[derive(Serialize)]
@@ -85,8 +96,13 @@ pub struct SalesReport {
     net_kobo: i64,
     collected_kobo: i64,
     outstanding_kobo: i64,
+    returns_kobo: i64,
+    refunds_kobo: i64,
     cost_kobo: i64,
     profit_kobo: i64,
+    expenses_kobo: i64,
+    net_profit_kobo: i64,
+    by_expense: Vec<NamedTotal>,
     by_day: Vec<DayPoint>,
     by_method: Vec<NamedTotal>,
     by_cashier: Vec<NamedTotal>,
@@ -107,9 +123,16 @@ pub fn sales_report(state: tauri::State<'_, AppState>, session_token: String, fr
         .map_err(|e| e.to_string())?;
     let voided = scalar(&conn, &format!("SELECT COUNT(*) FROM receipts r WHERE r.payment_status='void' AND {range}"), params![from, to])?;
     let cost_kobo = scalar(&conn, &format!("SELECT COALESCE(SUM(ROUND(i.unit_cost_kobo*i.quantity)),0) FROM receipt_items i JOIN receipts r ON r.id=i.receipt_id WHERE r.payment_status<>'void' AND {range}"), params![from, to])?;
+    // Returns count on the day goods came back; their cost comes back into stock.
+    let t_range = "date(t.created_at,'localtime') BETWEEN ?1 AND ?2";
+    let returns_kobo = scalar(&conn, &format!("SELECT COALESCE(SUM(t.value_kobo),0) FROM returns t WHERE {t_range}"), params![from, to])?;
+    let refunds_kobo = scalar(&conn, &format!("SELECT COALESCE(SUM(t.refund_paid_kobo),0) FROM returns t WHERE {t_range}"), params![from, to])?;
+    let returned_cost = scalar(&conn, &format!("SELECT COALESCE(SUM(x.cost_kobo),0) FROM return_items x JOIN returns t ON t.id=x.return_id WHERE {t_range}"), params![from, to])?;
+    let cost_kobo = cost_kobo - returned_cost;
+    let expenses_kobo = scalar(&conn, "SELECT COALESCE(SUM(amount_kobo),0) FROM expenses WHERE expense_date BETWEEN ?1 AND ?2", params![from, to])?;
 
     let mut stmt = conn.prepare("WITH RECURSIVE days(d) AS (SELECT ?1 UNION ALL SELECT date(d,'+1 day') FROM days WHERE d < ?2 LIMIT 400)
-         SELECT d, COALESCE((SELECT SUM(total_kobo) FROM receipts r WHERE r.payment_status<>'void' AND date(r.created_at,'localtime')=d),0),
+         SELECT d, COALESCE((SELECT SUM(total_kobo-returned_kobo) FROM receipts r WHERE r.payment_status<>'void' AND date(r.created_at,'localtime')=d),0),
                    (SELECT COUNT(*) FROM receipts r WHERE r.payment_status<>'void' AND date(r.created_at,'localtime')=d)
          FROM days ORDER BY d").map_err(|e| e.to_string())?;
     let by_day = stmt.query_map(params![from, to], |r| Ok(DayPoint { date: r.get(0)?, total_kobo: r.get(1)?, receipts: r.get(2)? })).map_err(|e| e.to_string())?.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?;
@@ -126,14 +149,15 @@ pub fn sales_report(state: tauri::State<'_, AppState>, session_token: String, fr
         "SELECT COALESCE(c.name,'Uncategorised'),COUNT(*),SUM(i.line_total_kobo) FROM receipt_items i JOIN receipts r ON r.id=i.receipt_id
          LEFT JOIN products p ON p.id=i.product_id LEFT JOIN categories c ON c.id=p.category_id
          WHERE r.payment_status<>'void' AND {range} GROUP BY 1 ORDER BY 3 DESC"))?;
+    let by_expense = named("SELECT category,COUNT(*),SUM(amount_kobo) FROM expenses WHERE expense_date BETWEEN ?1 AND ?2 GROUP BY category ORDER BY 3 DESC".into())?;
 
     let mut stmt = conn.prepare(&format!(
-        "SELECT i.product_name,i.unit,SUM(i.quantity),SUM(i.line_total_kobo),SUM(ROUND(i.unit_cost_kobo*i.quantity))
+        "SELECT i.product_name,i.unit,SUM(i.quantity-i.returned_qty),SUM(ROUND(i.line_total_kobo*(i.quantity-i.returned_qty)/i.quantity)),SUM(ROUND(i.unit_cost_kobo*(i.quantity-i.returned_qty)))
          FROM receipt_items i JOIN receipts r ON r.id=i.receipt_id WHERE r.payment_status<>'void' AND {range}
          GROUP BY i.product_name,i.unit ORDER BY 4 DESC LIMIT 200")).map_err(|e| e.to_string())?;
     let items = stmt
         .query_map(params![from, to], |r| {
-            let revenue: i64 = r.get(3)?;
+            let revenue: i64 = r.get::<_, f64>(3)? as i64;
             let cost: i64 = r.get::<_, f64>(4)? as i64;
             Ok(ItemPerformance { name: r.get(0)?, unit: r.get(1)?, quantity: r.get(2)?, revenue_kobo: revenue, cost_kobo: cost, profit_kobo: revenue - cost })
         })
@@ -141,9 +165,16 @@ pub fn sales_report(state: tauri::State<'_, AppState>, session_token: String, fr
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())?;
 
+    let refunded_on_range: i64 = scalar(&conn, &format!("SELECT COALESCE(SUM(refunded_kobo),0) FROM receipts r WHERE r.payment_status<>'void' AND {range}"), params![from, to])?;
+    let returned_on_range: i64 = scalar(&conn, &format!("SELECT COALESCE(SUM(returned_kobo),0) FROM receipts r WHERE r.payment_status<>'void' AND {range}"), params![from, to])?;
+    let net_sales = net - returns_kobo;
+    // Profit excludes tax (it belongs to the government) on the share of sales kept.
+    let tax_kept = if net > 0 { ((tax as f64) * (net_sales as f64) / (net as f64)).round() as i64 } else { 0 };
+    let profit_kobo = (net_sales - tax_kept) - cost_kobo;
     Ok(SalesReport {
-        from, to, receipts, voided, gross_kobo: gross, discount_kobo: discount, tax_kobo: tax, net_kobo: net,
-        collected_kobo: paid, outstanding_kobo: net - paid, cost_kobo, profit_kobo: (net - tax) - cost_kobo,
+        from, to, receipts, voided, gross_kobo: gross, discount_kobo: discount, tax_kobo: tax, net_kobo: net_sales,
+        collected_kobo: paid - refunded_on_range, outstanding_kobo: ((net - returned_on_range) - (paid - refunded_on_range)).max(0),
+        returns_kobo, refunds_kobo, cost_kobo, profit_kobo, expenses_kobo, net_profit_kobo: profit_kobo - expenses_kobo, by_expense,
         by_day, by_method, by_cashier, by_category, items,
     })
 }
@@ -170,17 +201,6 @@ pub fn save_export(app: tauri::AppHandle, state: tauri::State<'_, AppState>, ses
     let path = downloads_dir(&app)?.join(name);
     // UTF-8 BOM so Excel shows ₦ and other characters correctly.
     std::fs::write(&path, format!("\u{feff}{content}")).map_err(|e| format!("Could not save file: {e}"))?;
-    Ok(path.display().to_string())
-}
-
-#[tauri::command]
-pub fn backup_database(app: tauri::AppHandle, state: tauri::State<'_, AppState>, session_token: String) -> Result<String, String> {
-    auth::require(&state, &session_token, Role::Owner)?;
-    let path = downloads_dir(&app)?.join(format!("estock-backup-{}.sqlite3", chrono::Local::now().format("%Y%m%d-%H%M%S")));
-    let conn = state.db()?;
-    let mut dest = Connection::open(&path).map_err(|e| format!("Could not create backup file: {e}"))?;
-    let backup = rusqlite::backup::Backup::new(&conn, &mut dest).map_err(|e| e.to_string())?;
-    backup.run_to_completion(256, std::time::Duration::from_millis(0), None).map_err(|e| format!("Backup failed: {e}"))?;
     Ok(path.display().to_string())
 }
 

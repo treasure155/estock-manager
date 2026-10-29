@@ -5,3 +5,11 @@ src-tauri/target/
 *.sqlite3-shm
 *.sqlite3-wal
 .DS_Store
+src-tauri/gen/
+
+# Signing keys must never be committed (they live in ~/.estock-keys)
+.estock-keys/
+*.pem
+updater.key
+updater.key.pub
+updater-password.txt
