@@ -12,8 +12,8 @@ const cur = () => esc(store.settings.currency_symbol || '₦');
 /** Start of a cashier's shift: count the float (change) in the drawer. */
 export function openShiftDialog(after: (s: ShiftReport) => void) {
   const m = modal({ title: 'Open shift', size: 'sm', body: `<form class="stack">
-    <p class="muted">Count the cash in the drawer before your first sale. At the end of the shift you count it again and the app shows if anything is short or over.</p>
-    <label class="field"><span>Cash in drawer now (float)</span><span class="input-affix"><span class="affix">${cur()}</span><input name="float" inputmode="decimal" value="0" required autofocus></span></label>
+    <p class="muted">Count the change money already in the drawer before your first sale. This is your starting cash (float), not a sale. At the end of the shift you count it again and the app shows if anything is short or over.</p>
+    <label class="field"><span>Starting cash in the drawer (change money, not a sale)</span><span class="input-affix"><span class="affix">${cur()}</span><input name="float" inputmode="decimal" value="0" required autofocus></span></label>
     <p class="form-error" role="alert" data-err></p>
     <div class="form-actions"><button type="button" class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-primary">Open shift</button></div></form>` });
   const form = m.el.querySelector('form')!;
@@ -39,11 +39,11 @@ function reportMarkup(r: ShiftReport): string {
       ${r.by_method.map((m) => row(`Received by ${m.method}`, money(m.amount_kobo))).join('')}
     </div>
     <div class="slip-pay">
-      ${row('Opening float', money(r.opening_float_kobo))}
+      ${row('Starting cash (float)', money(r.opening_float_kobo))}
       ${row('+ Cash taken', money(r.cash_sales_kobo))}
       ${r.cash_refunds_kobo ? row('− Cash refunds', money(r.cash_refunds_kobo)) : ''}
       ${r.cash_expenses_kobo ? row('− Cash expenses', money(r.cash_expenses_kobo)) : ''}
-      ${row('Expected in drawer', money(r.expected_cash_kobo), 'slip-grand')}
+      ${row('Drawer should have', money(r.expected_cash_kobo), 'slip-grand')}
       ${r.status === 'closed' ? `${row('Counted', money(r.counted_cash_kobo))}${row(r.difference_kobo === 0 ? 'Balanced' : r.difference_kobo > 0 ? 'Over' : 'Short', money(Math.abs(r.difference_kobo)), r.difference_kobo < 0 ? 'slip-due' : '')}` : ''}
     </div>
     ${r.note ? `<p class="slip-note">${esc(r.note)}</p>` : ''}
@@ -59,7 +59,7 @@ export function showShiftReport(r: ShiftReport) {
 
 function closeShiftDialog(r: ShiftReport, after: (s: ShiftReport) => void) {
   const m = modal({ title: 'Close shift and count cash', size: 'md', body: `<form class="stack">
-    <div class="figures figures-3"><div><span>Opening float</span><b>${money(r.opening_float_kobo)}</b></div><div><span>Cash taken</span><b>${money(r.cash_sales_kobo)}</b></div><div><span>Expected in drawer</span><b>${money(r.expected_cash_kobo)}</b></div></div>
+    <div class="figures figures-3"><div><span>Starting cash (float)</span><b>${money(r.opening_float_kobo)}</b></div><div><span>Cash taken</span><b>${money(r.cash_sales_kobo)}</b></div><div><span>Expected in drawer</span><b>${money(r.expected_cash_kobo)}</b></div></div>
     ${r.cash_refunds_kobo || r.cash_expenses_kobo ? `<p class="muted small">Expected cash already takes off ${money(r.cash_refunds_kobo)} in cash refunds and ${money(r.cash_expenses_kobo)} in cash expenses paid during the shift.</p>` : ''}
     <label class="field"><span>Cash you counted</span><span class="input-affix"><span class="affix">${cur()}</span><input name="counted" inputmode="decimal" required autofocus></span></label>
     <p class="diff-line" data-diff></p>
@@ -96,7 +96,7 @@ export async function render(ctx: ViewCtx) {
     const box = $('[data-current]', ctx.main)!;
     box.innerHTML = r ? `<header class="panel-head"><div><h2>Your shift is open</h2><p class="muted small">Since ${esc(relativeDay(r.opened_at))}</p></div>
         <div class="row-actions"><button class="btn btn-ghost" data-report>${icon('receipt', 16)} X report</button><button class="btn btn-primary" data-close-shift>Close shift & count cash</button></div></header>
-        <div class="figures"><div><span>Receipts</span><b>${r.receipts}</b></div><div><span>Sales</span><b>${money(r.sales_kobo)}</b></div><div><span>Opening float</span><b>${money(r.opening_float_kobo)}</b></div><div><span>Cash expected now</span><b>${money(r.expected_cash_kobo)}</b></div></div>`
+        <div class="figures"><div><span>Receipts</span><b>${r.receipts}</b></div><div><span>Sales</span><b>${money(r.sales_kobo)}</b></div><div><span>Starting cash (float)</span><b>${money(r.opening_float_kobo)}</b></div><div><span>Cash expected now</span><b>${money(r.expected_cash_kobo)}</b></div></div>`
       : `<div class="empty compact">${icon('cash', 26)}<h3>No open shift</h3><p>Open a shift at the start of work. ${store.flag('require_shift') ? 'Selling is blocked until you do.' : 'It keeps your cash drawer honest.'}</p><button class="btn btn-primary" data-open-shift>Open shift</button></div>`;
     box.onclick = (e) => {
       const t = e.target as HTMLElement;

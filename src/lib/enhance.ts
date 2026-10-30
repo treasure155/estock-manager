@@ -1,4 +1,5 @@
 import { copyText } from './clipboard';
+import { receivePayment } from './customer-pay';
 import { toast } from './dom';
 import { icon } from './icons';
 import { shareWhatsApp } from './whatsapp';
@@ -45,11 +46,33 @@ function labelTables() {
   });
 }
 
+/** Customers who owe: a "Receive payment" button next to Receipts / Statement. */
+function enhanceCustomerRows() {
+  document.querySelectorAll<HTMLElement>('[data-receipts]:not([data-pay-added])').forEach((btn) => {
+    btn.dataset.payAdded = '1';
+    if (!btn.closest('tr')?.querySelector('b.warn-text')) return;
+    const pay = document.createElement('button');
+    pay.type = 'button';
+    pay.className = 'btn btn-primary btn-sm';
+    pay.textContent = 'Receive payment';
+    pay.dataset.payCustomer = btn.dataset.receipts ?? '';
+    btn.before(pay);
+  });
+}
+document.addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLElement>('[data-pay-customer]');
+  if (!b) return;
+  void receivePayment(Number(b.dataset.payCustomer), () => {
+    document.querySelector<HTMLInputElement>('[data-search]')?.dispatchEvent(new Event('input'));
+  });
+});
+
 let queued = false;
 function run() {
   queued = false;
   enhanceInstallIds();
   labelTables();
+  enhanceCustomerRows();
 }
 new MutationObserver(() => {
   if (!queued) { queued = true; requestAnimationFrame(run); }

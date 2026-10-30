@@ -1,5 +1,5 @@
 #!/bin/sh
-# eStock Manager: phone fixes (scrolling, pop-ups, till) + receipts as PDF on Android.
+# eStock Manager update: phone layout fixes, PDF receipts on Android, Copy/WhatsApp for the Install ID, Receive payment for customers who owe.
 # Run from the project folder (the one that contains package.json):  sh apply-update.sh
 set -e
 [ -f package.json ] && [ -d src ] || { echo "Run this from the project folder (where package.json is)."; exit 1; }
@@ -12,12 +12,20 @@ cat > src/styles/mobile-fixes.css <<'ESTOCK_EOF'
    - Everything stays clear of the status bar and the navigation bar. */
 :root { --safe-t: env(safe-area-inset-top, 0px); --safe-b: env(safe-area-inset-bottom, 0px); }
 
+/* Receive payment dialog: the unpaid receipts it will clear */
+.pay-receipts { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.pay-receipts li { display: flex; justify-content: space-between; gap: 12px; padding: 8px 10px; background: var(--surface-2); border-radius: var(--r); }
+
+/* Install ID row: the code and its Copy / WhatsApp buttons wrap instead of squeezing */
+.install-id-row { flex-wrap: wrap; }
+.install-id-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
 @media (max-width: 760px) {
   #app { height: 100vh; height: 100dvh; padding: var(--safe-t) 0 var(--safe-b); }
   .shell { display: block; height: 100%; }
   .workspace { height: 100%; }
   .sidebar { padding-top: var(--safe-t); padding-bottom: var(--safe-b); }
-  .modal-wrap { padding: var(--safe-t) 0 var(--safe-b); place-items: stretch; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
+  .modal-wrap, .modal-wrap.is-drawer { padding: var(--safe-t) 0 var(--safe-b); place-items: stretch; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
   .modal, .modal-sm, .modal-md, .modal-lg, .modal-wrap.is-drawer .modal { max-height: 100%; }
 
   .auth { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr); height: 100%; min-height: 0; }
@@ -57,6 +65,27 @@ cat > src/styles/mobile-fixes.css <<'ESTOCK_EOF'
   /* Receipt pop-up: Print / WhatsApp / Email first, the paper below */
   .receipt-view { display: flex; flex-direction: column; gap: 14px; }
   .receipt-view .receipt-side { order: -1; position: static; }
+
+  /* Rows of buttons, tabs and categories wrap, so every one is visible without sideways scrolling */
+  .topbar-actions { flex-wrap: wrap; overflow: visible; }
+  .topbar-actions .btn { flex: 1 1 auto; justify-content: center; }
+  .settings-nav { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; overflow: visible; }
+  .settings-nav button { white-space: normal; border: 1px solid var(--line); background: var(--surface); padding: 10px; }
+  .chips { flex-wrap: wrap; overflow: visible; }
+  .tabs, .panel-head { flex-wrap: wrap; }
+
+  /* Tables become stacked cards: every column and every button is on screen (cell headings are added by lib/enhance.ts) */
+  .table-scroll { overflow-x: visible; }
+  .table, .table tbody, .table tfoot, .table tr, .table td, .table th { display: block; width: auto; }
+  .table thead { display: none; }
+  .table tr { padding: 12px 14px; border-bottom: 1px solid var(--line); }
+  .table tbody tr:last-child { border-bottom: 0; }
+  .table td, .table th { padding: 2px 0; border: 0; text-align: left; white-space: normal; position: static; background: none; }
+  .table td:first-child, .table th:first-child { padding: 0 0 4px; font-size: 15px; }
+  .table .num { text-align: left; white-space: normal; }
+  .table td[data-label]:not([data-label=""]):not(:first-child)::before { content: attr(data-label) ": "; color: var(--muted); font-weight: 600; font-size: 12.5px; }
+  .table .actions-col { width: auto; text-align: left; padding-top: 6px; }
+  .table tfoot tr { background: var(--surface-2); font-weight: 700; }
 }
 ESTOCK_EOF
 
@@ -82,7 +111,7 @@ function applySafeAreaFallback() {
   probe.remove();
   const root = document.documentElement.style;
   if (top < 1) root.setProperty('--safe-t', '24px');
-  if (bottom < 1) root.setProperty('--safe-b', '48px');
+  if (bottom < 1) root.setProperty('--safe-b', '56px');
 }
 
 applySafeAreaFallback();
@@ -313,6 +342,182 @@ export async function printReceiptAndroidPdf(r: Receipt) {
 }
 ESTOCK_EOF
 
+cat > src/lib/clipboard.ts <<'ESTOCK_EOF'
+/** Copies text to the clipboard. Works in the Android app too, where navigator.clipboard is often blocked. */
+export async function copyText(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(text); return true; }
+  } catch { /* fall through to the older method */ }
+  try {
+    const box = document.createElement('textarea');
+    box.value = text;
+    box.setAttribute('readonly', '');
+    box.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;font-size:16px';
+    document.body.append(box);
+    box.focus();
+    box.select();
+    box.setSelectionRange(0, text.length);
+    const ok = document.execCommand('copy');
+    box.remove();
+    return ok;
+  } catch { return false; }
+}
+ESTOCK_EOF
+
+cat > src/lib/customer-pay.ts <<'ESTOCK_EOF'
+import { call } from '../api';
+import { errText, esc, modal, toast, withBusy } from './dom';
+import { dateLabel, money, nairaInput, toKobo } from './format';
+import { store } from '../store';
+import type { Customer, ReceiptSummary } from '../types';
+
+const owed = (r: ReceiptSummary) => (r.total_kobo - r.returned_kobo) - (r.amount_paid_kobo - r.refunded_kobo);
+
+/**
+ * A customer who owes comes to pay: one amount, applied to their unpaid receipts oldest first.
+ * Each part is saved as a normal "Record payment" on that receipt, so it lands in the open shift
+ * (cash-up and X / Z report), in the day's takings and in the customer's balance.
+ */
+export async function receivePayment(customerId: number, done: () => void) {
+  try {
+    const [customers, receipts] = await Promise.all([
+      call<Customer[]>('list_customers', { search: '' }),
+      call<ReceiptSummary[]>('list_receipts', { filter: { customer_id: customerId, status: 'owing' } }),
+    ]);
+    const customer = customers.find((c) => c.id === customerId);
+    const unpaid = receipts.filter((r) => r.payment_status !== 'void' && owed(r) > 0).sort((a, b) => a.id - b.id);
+    if (!customer) { toast('Customer not found', 'error'); return; }
+    if (!unpaid.length) { toast('There is no unpaid receipt here that you can take payment on.', 'info'); return; }
+    const total = unpaid.reduce((a, r) => a + owed(r), 0);
+    const methods = store.paymentMethods.filter((p) => p.active);
+    const hidden = customer.balance_kobo > total;
+
+    const m = modal({ title: 'Receive payment', subtitle: customer.name, size: 'sm', body: `<form class="stack">
+      <div class="callout callout-warn"><div><b>${money(total)} owed</b><span>${unpaid.length} unpaid receipt${unpaid.length === 1 ? '' : 's'}. The payment clears the oldest first.</span></div></div>
+      <ul class="pay-receipts">${unpaid.map((r) => `<li><span>${esc(r.receipt_no)} · ${esc(dateLabel(r.created_at))}</span><b>${money(owed(r))}</b></li>`).join('')}</ul>
+      ${hidden ? '<p class="muted small">This customer also owes on receipts issued by someone else. The owner or a manager can take payment on those.</p>' : ''}
+      <label class="field"><span>Amount received</span><span class="input-affix"><span class="affix">${esc(store.settings.currency_symbol || '₦')}</span><input name="amount" inputmode="decimal" required value="${nairaInput(total)}" autofocus></span></label>
+      <label class="field"><span>Method</span><select name="method">${methods.map((p) => `<option>${esc(p.name)}</option>`).join('')}</select></label>
+      <label class="field"><span>Reference <em class="muted">(optional)</em></span><input name="reference" maxlength="80"></label>
+      <p class="form-error" role="alert" data-err></p>
+      <div class="form-actions"><button type="button" class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-primary">Save payment</button></div></form>` });
+
+    const form = m.el.querySelector('form')!;
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const err = form.querySelector('[data-err]')!;
+      err.textContent = '';
+      const f = new FormData(form);
+      const amount = toKobo(String(f.get('amount')));
+      if (!(amount > 0)) { err.textContent = 'Enter an amount greater than zero.'; return; }
+      if (amount > total) { err.textContent = `That is more than the ${money(total)} owed.`; return; }
+      withBusy(form.querySelector('.btn-primary'), async () => {
+        let left = amount;
+        try {
+          for (const r of unpaid) {
+            if (left <= 0) break;
+            const part = Math.min(left, owed(r));
+            await call('record_payment', { receiptId: r.id, method: f.get('method'), amountKobo: part, reference: String(f.get('reference') || '') });
+            left -= part;
+          }
+          const still = total - amount;
+          toast(still > 0 ? `Payment saved. ${money(still)} still owed.` : 'Payment saved. Fully paid.');
+          m.close();
+        } catch (x) {
+          err.textContent = errText(x);
+        }
+        done();
+      });
+    });
+  } catch (x) {
+    toast(errText(x), 'error');
+  }
+}
+ESTOCK_EOF
+
+cat > src/lib/enhance.ts <<'ESTOCK_EOF'
+import { copyText } from './clipboard';
+import { receivePayment } from './customer-pay';
+import { toast } from './dom';
+import { icon } from './icons';
+import { shareWhatsApp } from './whatsapp';
+
+/**
+ * Small additions that apply to every page without touching each page's code.
+ * Runs once at start-up and again whenever a page redraws itself.
+ */
+
+/** Install ID (the code you send to get a licence key): a Copy button and a WhatsApp button next to it. */
+function enhanceInstallIds() {
+  document.querySelectorAll<HTMLElement>('.install-id-row:not([data-enhanced])').forEach((row) => {
+    const id = row.querySelector('code')?.textContent?.trim();
+    if (!id) return;
+    row.dataset.enhanced = '1';
+    row.querySelectorAll('[data-copy]').forEach((old) => old.remove());
+    const actions = document.createElement('div');
+    actions.className = 'install-id-actions';
+    actions.innerHTML = `<button type="button" class="btn btn-primary btn-sm" data-copy-id>Copy</button>
+      <button type="button" class="btn btn-ghost btn-sm" data-send-id>${icon('chat', 15)} WhatsApp</button>`;
+    row.append(actions);
+    actions.querySelector('[data-copy-id]')!.addEventListener('click', async () => {
+      toast((await copyText(id)) ? 'Install ID copied' : 'Could not copy. Press and hold the code to select it.', 'info');
+    });
+    actions.querySelector('[data-send-id]')!.addEventListener('click', () => { void shareWhatsApp('', `eStock Manager Install ID: ${id}`); });
+  });
+}
+
+/**
+ * On a phone, tables turn into stacked cards (see mobile-fixes.css) so no column or button sits
+ * off-screen. The cards need each cell to know its column heading, which is set here.
+ */
+function labelTables() {
+  document.querySelectorAll<HTMLTableElement>('table.table').forEach((table) => {
+    const heads = Array.from(table.tHead?.rows[0]?.cells ?? []).map((c) => (c.textContent ?? '').trim());
+    if (!heads.length) return;
+    Array.from(table.tBodies).forEach((body) => Array.from(body.rows).forEach((row) => {
+      let col = 0;
+      Array.from(row.cells).forEach((cell) => {
+        if (cell.tagName === 'TD' && !cell.hasAttribute('data-label')) cell.setAttribute('data-label', heads[col] ?? '');
+        col += cell.colSpan || 1;
+      });
+    }));
+  });
+}
+
+/** Customers who owe: a "Receive payment" button next to Receipts / Statement. */
+function enhanceCustomerRows() {
+  document.querySelectorAll<HTMLElement>('[data-receipts]:not([data-pay-added])').forEach((btn) => {
+    btn.dataset.payAdded = '1';
+    if (!btn.closest('tr')?.querySelector('b.warn-text')) return;
+    const pay = document.createElement('button');
+    pay.type = 'button';
+    pay.className = 'btn btn-primary btn-sm';
+    pay.textContent = 'Receive payment';
+    pay.dataset.payCustomer = btn.dataset.receipts ?? '';
+    btn.before(pay);
+  });
+}
+document.addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLElement>('[data-pay-customer]');
+  if (!b) return;
+  void receivePayment(Number(b.dataset.payCustomer), () => {
+    document.querySelector<HTMLInputElement>('[data-search]')?.dispatchEvent(new Event('input'));
+  });
+});
+
+let queued = false;
+function run() {
+  queued = false;
+  enhanceInstallIds();
+  labelTables();
+  enhanceCustomerRows();
+}
+new MutationObserver(() => {
+  if (!queued) { queued = true; requestAnimationFrame(run); }
+}).observe(document.body, { childList: true, subtree: true });
+run();
+ESTOCK_EOF
+
 cat > tools/android-native.mjs <<'ESTOCK_EOF'
 #!/usr/bin/env node
 // Runs after `tauri android init` (imported by android-signing.mjs). Adds two small
@@ -500,6 +705,9 @@ grep -q android-native tools/android-signing.mjs || sed -i "s#^import { ROOT } f
 # (from the previous round, only if not already applied)
 grep -q viewport-fit index.html || sed -i 's/initial-scale=1.0"/initial-scale=1.0, viewport-fit=cover"/' index.html
 grep -q mobile-fixes src/main.ts || sed -i "s#^import './styles/mobile.css';#import './styles/mobile.css';\nimport './styles/mobile-fixes.css';\nimport './lib/insets';#" src/main.ts
+# clearer shift wording: "float" is the starting change money, not a sale
+sed -i "s#row('Opening float'#row('Starting cash (float)'#; s#<span>Opening float</span>#<span>Starting cash (float)</span>#g; s#row('Expected in drawer'#row('Drawer should have'#; s#Cash in drawer now (float)#Starting cash in the drawer (change money, not a sale)#; s#Count the cash in the drawer before your first sale\.#Count the change money already in the drawer before your first sale. This is your starting cash (float), not a sale.#" src/views/shifts.ts
+grep -q "lib/enhance" src/main.ts || sed -i "s#^import './lib/insets';#import './lib/insets';\nimport './lib/enhance';#" src/main.ts
 
 
 # ---- check every edit landed
@@ -509,5 +717,7 @@ grep -q "shareReceipt(r," src/views/pos.ts || { echo "!! src/views/pos.ts was no
 grep -q "shareReceipt(r," src/views/receipts.ts || { echo "!! src/views/receipts.ts was not updated"; ok=0; }
 grep -q android-native tools/android-signing.mjs || { echo "!! tools/android-signing.mjs was not updated"; ok=0; }
 grep -q viewport-fit index.html || { echo "!! index.html was not updated"; ok=0; }
-grep -q mobile-fixes src/main.ts || { echo "!! src/main.ts was not updated"; ok=0; }
-if [ $ok = 1 ]; then echo "All changes applied. Now: git add -A && git commit -m \"Mobile fixes, receipts as PDF\" && git push origin main"; else echo "Some edits did not match your files - send me the lines above."; exit 1; fi
+grep -q mobile-fixes src/main.ts || { echo "!! src/main.ts (mobile-fixes) was not updated"; ok=0; }
+grep -q "lib/enhance" src/main.ts || { echo "!! src/main.ts (enhance) was not updated"; ok=0; }
+grep -q "Starting cash (float)" src/views/shifts.ts || { echo "!! src/views/shifts.ts wording was not updated"; ok=0; }
+if [ $ok = 1 ]; then echo "All changes applied. Now: git add -A && git commit -m \"Phone fixes, PDF receipts, receive payment\" && git push origin main"; else echo "Some edits did not match your files - send me the lines above."; exit 1; fi

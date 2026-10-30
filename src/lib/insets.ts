@@ -19,7 +19,7 @@ function applySafeAreaFallback() {
   probe.remove();
   const root = document.documentElement.style;
   if (top < 1) root.setProperty('--safe-t', '24px');
-  if (bottom < 1) root.setProperty('--safe-b', '48px');
+  if (bottom < 1) root.setProperty('--safe-b', '56px');
 }
 
 applySafeAreaFallback();

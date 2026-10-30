@@ -5,6 +5,10 @@
    - Everything stays clear of the status bar and the navigation bar. */
 :root { --safe-t: env(safe-area-inset-top, 0px); --safe-b: env(safe-area-inset-bottom, 0px); }
 
+/* Receive payment dialog: the unpaid receipts it will clear */
+.pay-receipts { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.pay-receipts li { display: flex; justify-content: space-between; gap: 12px; padding: 8px 10px; background: var(--surface-2); border-radius: var(--r); }
+
 /* Install ID row: the code and its Copy / WhatsApp buttons wrap instead of squeezing */
 .install-id-row { flex-wrap: wrap; }
 .install-id-actions { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -14,7 +18,7 @@
   .shell { display: block; height: 100%; }
   .workspace { height: 100%; }
   .sidebar { padding-top: var(--safe-t); padding-bottom: var(--safe-b); }
-  .modal-wrap { padding: var(--safe-t) 0 var(--safe-b); place-items: stretch; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
+  .modal-wrap, .modal-wrap.is-drawer { padding: var(--safe-t) 0 var(--safe-b); place-items: stretch; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
   .modal, .modal-sm, .modal-md, .modal-lg, .modal-wrap.is-drawer .modal { max-height: 100%; }
 
   .auth { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr); height: 100%; min-height: 0; }
