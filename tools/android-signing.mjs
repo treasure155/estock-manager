@@ -20,7 +20,7 @@ if (!g.includes('signingConfigs')) {
   const block = `    signingConfigs {
         create("release") {
             val ksFile = rootProject.file("keystore.properties")
-            val ks = java.util.Properties()
+            val ks = Properties()
             if (ksFile.exists()) ksFile.inputStream().use { ks.load(it) }
             keyAlias = ks.getProperty("keyAlias")
             keyPassword = ks.getProperty("password")
@@ -34,6 +34,9 @@ if (!g.includes('signingConfigs')) {
   g = g.replace(/\n\s*buildTypes \{/, `\n${block}`);
   if (!/getByName\("release"\) \{/.test(g)) { console.error('✘ Unexpected build.gradle.kts layout (no release build type).'); process.exit(1); }
   g = g.replace(/getByName\("release"\) \{/, 'getByName("release") {\n            signingConfig = signingConfigs.getByName("release")');
-  writeFileSync(gradle, g);
 }
+// The block above uses Properties(); inside android { } a bare `java.util...` is
+// resolved against the Gradle `java` extension and fails to compile, so import it.
+if (!/^import java\.util\.Properties\s*$/m.test(g)) g = 'import java.util.Properties\n' + g;
+writeFileSync(gradle, g);
 console.log('✔ Android release signing configured');
