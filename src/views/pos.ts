@@ -8,6 +8,7 @@ import { store } from '../store';
 import type { Customer, HeldSale, Product, Receipt, ShiftReport } from '../types';
 import type { ViewCtx } from './shell';
 import { openShiftDialog } from './shifts';
+import { isMobile } from '../lib/platform';
 
 type SellAs = 'unit' | 'pack';
 /** `override` is a price typed at the till; otherwise the list, pack or wholesale price applies. */
@@ -85,7 +86,7 @@ export async function render(ctx: ViewCtx) {
       <div class="pos-search">
         ${icon('search', 18)}
         <input type="search" id="pos-search" placeholder="Search ${esc(store.label('items').toLowerCase())} or scan a barcode" autocomplete="off" spellcheck="false" value="${esc(query)}" aria-label="Search or scan">
-        <span class="pos-search-hint">${icon('barcode', 16)} Scanner ready</span>
+        ${isMobile ? `<button type="button" class="btn btn-ghost btn-sm cam-btn" data-camscan aria-label="Scan with camera">${icon('barcode', 16)} Scan</button>` : `<span class="pos-search-hint">${icon('barcode', 16)} Scanner ready</span>`}
       </div>
       <div class="chips" role="tablist" aria-label="Categories">
         <button class="chip ${activeCategory === 'all' ? 'is-on' : ''}" data-cat="all" role="tab" aria-selected="${activeCategory === 'all'}">All</button>
@@ -175,6 +176,23 @@ export async function render(ctx: ViewCtx) {
   search.addEventListener('keydown', (e) => {
     if (e.key !== 'Enter') return;
     e.preventDefault();
+    handleCode();
+  });
+  // Phone camera scanning (Android): the scanned code goes through the same path as a USB scanner.
+  $('[data-camscan]', ctx.main)?.addEventListener('click', async () => {
+    try {
+      const bs = await import('@tauri-apps/plugin-barcode-scanner');
+      let perm = await bs.checkPermissions();
+      if (perm !== 'granted') perm = await bs.requestPermissions();
+      if (perm !== 'granted') { toast('Allow camera access for eStock Manager in your phone settings to scan barcodes.', 'error'); return; }
+      const res = await bs.scan({ windowed: false, formats: [bs.Format.EAN13, bs.Format.EAN8, bs.Format.UPC_A, bs.Format.UPC_E, bs.Format.Code128, bs.Format.Code39, bs.Format.QRCode] });
+      if (res?.content) { search.value = res.content.trim(); handleCode(); }
+    } catch (x) {
+      const msg = errText(x);
+      if (!/cancel/i.test(msg)) toast(`Camera scanning is not available: ${msg}`, 'error');
+    }
+  });
+  function handleCode() {
     const code = search.value.trim().toLowerCase();
     if (!code) return;
     const exact = sellable().find((p) => (p.barcode && p.barcode.toLowerCase() === code) || p.sku.toLowerCase() === code);
@@ -188,7 +206,7 @@ export async function render(ctx: ViewCtx) {
       if (auth.can('manager') && /^[A-Za-z0-9-]{4,64}$/.test(code)) offerNewBarcode(code);
       else { toast(`No ${store.label('item').toLowerCase()} with code “${code}”`, 'error'); search.select(); }
     } else drawTiles();
-  });
+  }
 
   // A scanned code nobody has yet: managers can create the item on the spot, and it goes straight into the sale.
   const offerNewBarcode = async (code: string) => {

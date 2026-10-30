@@ -211,8 +211,8 @@ export const GUIDE: GuideSection[] = [
     html: `<p class="guide-lead">Every new computer gets a <b>14-day free trial</b> with all features. To keep using eStock Manager after that, each computer needs its own licence key.</p>
     <ol>
       <li>Open <b>Settings → Licence</b> (or click <b>Activate</b> in the blue strip at the top).</li>
-      <li>Copy the <b>Install ID</b>, for example <code>G147-RQYW-Y4VJ-4EQK</code>, and send it to your eStock Manager provider.</li>
-      <li>The provider sends back a licence key starting with <code>ESTK-</code>. Paste it into the box and click <b>Activate</b>.</li>
+      <li>Copy the <b>Install ID</b>, for example <code>G147-RQYW-Y4VJ-4EQK</code>, and send it to TechAlpha Hub: click <b>Request key on WhatsApp</b> (+234 706 615 5981) or <b>Email us</b> (info@techalphahub.online). The Install ID is filled in for you. A licence costs ₦30,000 per year or ₦3,000 per month.</li>
+      <li>TechAlpha Hub sends back a licence key starting with <code>ESTK-</code>. Paste it into the box and click <b>Activate</b>.</li>
     </ol>
     <p>A key only works on the computer whose Install ID it was made for. A second shop computer needs its own key. If the trial or a dated licence ends, the app shows the activation screen; your sales, stock and customers are kept safe and come back as soon as you activate.</p>
     <p class="guide-note">Setting the computer clock backwards does not extend the trial, and reinstalling the app does not restart it.</p>`,
@@ -393,6 +393,18 @@ export const GUIDE: GuideSection[] = [
       <li>Open the app.</li>
     </ol>
     <p>A restored backup also brings back the recovery key and security questions that were set when it was made. The licence is tied to the computer, not the backup.</p>`,
+  },
+  {
+    id: 'android', title: 'Using eStock Manager on Android',
+    html: `<p class="guide-lead">eStock Manager also runs on Android phones and tablets, with the same features and the same licence prices.</p>
+    <ol>
+      <li><b>Install:</b> on the phone, open the latest release page, download the file ending in <b>_android.apk</b>, open it and tap <b>Install</b>. Allow installing from your browser if Android asks.</li>
+      <li><b>Menu:</b> tap ☰ at the top left to move between pages.</li>
+      <li><b>Scan barcodes:</b> on New sale, tap <b>Scan</b> and point the camera at the barcode. Allow camera access the first time.</li>
+      <li><b>Print receipts:</b> install the free <b>RawBT Print Service</b> app from the Play Store and pair your Bluetooth or USB receipt printer in it once. Then tap <b>Print receipt</b> in eStock Manager.</li>
+      <li><b>Updates:</b> Settings → Updates → <b>Get the latest version</b>, download the new APK and tap <b>Update</b>. Your data stays.</li>
+    </ol>
+    <p>Each phone needs its own licence key, like each computer. Labels, statements and shift reports print from the Windows or Mac app; statements can be sent on WhatsApp from the phone.</p>`,
   },
   {
     id: 'shortcuts', title: 'Shortcuts and tips',

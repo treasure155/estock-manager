@@ -35,6 +35,7 @@ const roleName: Record<Role, string> = { owner: 'Owner', manager: 'Manager', cas
 export function mountShell(root: HTMLElement, onSignOut: () => void) {
   const s = auth.session!;
   root.innerHTML = `<div class="shell">
+    <div class="nav-scrim" data-menu-close></div>
     <aside class="sidebar" aria-label="Main">
       <div class="side-brand" data-brand></div>
       <nav class="side-nav" data-nav></nav>
@@ -46,7 +47,7 @@ export function mountShell(root: HTMLElement, onSignOut: () => void) {
     </aside>
     <div class="workspace">
       <div class="app-banner" data-banner hidden></div>
-      <header class="topbar"><div class="topbar-title"><h1 data-title></h1><p data-subtitle></p></div><div class="topbar-actions" data-actions></div></header>
+      <header class="topbar"><button class="icon-btn menu-btn" data-menu aria-label="Open menu">${icon('menu', 22)}</button><div class="topbar-title"><h1 data-title></h1><p data-subtitle></p></div><div class="topbar-actions" data-actions></div></header>
       <main class="view" id="view" tabindex="-1"></main>
     </div>
   </div>`;
@@ -99,7 +100,11 @@ export function mountShell(root: HTMLElement, onSignOut: () => void) {
     }
   };
 
+  const shellEl = $('.shell', root)!;
   root.addEventListener('click', (e) => {
+    const t = e.target as HTMLElement;
+    if (t.closest('[data-menu]')) { shellEl.classList.add('nav-open'); return; }
+    if (t.closest('[data-menu-close]') || (t.closest('[data-view]') && t.closest('.side-nav'))) shellEl.classList.remove('nav-open');
     const nav = (e.target as HTMLElement).closest<HTMLElement>('[data-view]');
     if (nav && root.contains(nav) && nav.closest('.side-nav')) go(nav.dataset.view!);
     if ((e.target as HTMLElement).closest('[data-signout]')) {

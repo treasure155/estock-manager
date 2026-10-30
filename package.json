@@ -1,7 +1,7 @@
 {
   "name": "estock-manager",
   "private": true,
-  "version": "3.0.2",
+  "version": "3.1.0",
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
@@ -12,12 +12,14 @@
     "icons": "tauri icon src-tauri/icons/app-icon.png",
     "setup-keys": "node tools/setup-keys.mjs",
     "license": "node tools/license-admin.mjs",
-    "release": "node tools/release.mjs"
+    "release": "node tools/release.mjs",
+    "check-update": "node tools/check-update.mjs"
   },
   "dependencies": {
     "@fontsource/courier-prime": "^5.2.0",
     "@fontsource/libre-franklin": "^5.2.0",
     "@tauri-apps/api": "^2.0.0",
+    "@tauri-apps/plugin-barcode-scanner": "^2.5.3",
     "@tauri-apps/plugin-dialog": "^2.0.0",
     "@tauri-apps/plugin-opener": "^2.0.0",
     "@tauri-apps/plugin-process": "^2.0.0",

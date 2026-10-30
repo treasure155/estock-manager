@@ -5,8 +5,9 @@ import { printHtml, receiptMarkup } from '../lib/receipt';
 import { applyTheme, contrast, PRESETS } from '../lib/theme';
 import { store } from '../store';
 import type { BackupStatus, PaymentMethod, Receipt } from '../types';
-import { activationDialog, licence } from '../lib/license-ui';
+import { activationDialog, licence, vendorBlock, wireVendor } from '../lib/license-ui';
 import { appVersion, checkForUpdate, installUpdate } from '../lib/updater';
+import { isMobile, openExternal, RELEASES_URL } from '../lib/platform';
 import { dateLabel, relativeDay } from '../lib/format';
 import type { ViewCtx } from './shell';
 import { questionFields, readQuestions, wireQuestionFields } from './recovery-ui';
@@ -422,7 +423,7 @@ async function backup(body: HTMLElement) {
       <div class="figures figures-2"><div><span>Last backup</span><b>${st.last_auto ? esc(relativeDay(st.last_auto)) : 'Not yet'}</b></div><div><span>Backups kept</span><b>${st.files.length} of ${st.keep}</b></div></div>
       <form class="stack" data-bform>
         ${`<label class="check"><input type="checkbox" name="auto" ${st.auto ? 'checked' : ''}><span><b>Back up automatically every day</b><br><small class="muted">Runs in the background while the app is open. Older copies are deleted after the number you keep.</small></span></label>`}
-        <label class="field"><span>Backup folder</span><span class="input-affix"><input name="dir" value="${esc(st.dir === st.default_dir ? '' : st.dir)}" placeholder="${esc(st.default_dir)}" spellcheck="false"><button type="button" class="affix-btn" data-pick>Choose…</button></span>
+        <label class="field"><span>Backup folder</span><span class="input-affix"><input name="dir" value="${esc(st.dir === st.default_dir ? '' : st.dir)}" placeholder="${esc(st.default_dir)}" spellcheck="false">${isMobile ? '' : '<button type="button" class="affix-btn" data-pick>Choose…</button>'}</span>
           <small>Pick a flash drive or a Google Drive / OneDrive folder on this computer to keep copies off the machine. Empty uses ${esc(st.default_dir)}.</small></label>
         <label class="field"><span>Number of backups to keep</span><input name="keep" type="number" min="1" max="365" value="${st.keep}" class="w-num"></label>
         <p class="form-error" role="alert" data-err></p>
@@ -432,7 +433,7 @@ async function backup(body: HTMLElement) {
       <p class="muted small">To restore: close the app, then replace <code>eatery-manager.sqlite3</code> in the app data folder with a backup file renamed to that name. The guide (How to → Backup) shows the folder for Windows and Mac.</p>
     </div>`;
   const form = $<HTMLFormElement>('[data-bform]', body)!;
-  $('[data-pick]', body)!.addEventListener('click', async () => {
+  $('[data-pick]', body)?.addEventListener('click', async () => {
     try {
       const { open } = await import('@tauri-apps/plugin-dialog');
       const dir = await open({ directory: true, multiple: false, title: 'Choose a backup folder' });
@@ -459,22 +460,34 @@ async function licenceSection(body: HTMLElement) {
   const s = await licence.refresh();
   if (!s) { body.innerHTML = `${head('Licence', '')}<p class="form-error">Licence details could not be read.</p>`; return; }
   const state = s.state === 'licensed' ? `<span class="pill pill-ok">Activated</span>` : s.state === 'trial' ? `<span class="pill pill-info">Free trial</span>` : `<span class="pill pill-bad">Not active</span>`;
-  body.innerHTML = `${head('Licence', 'Every computer needs its own licence key. Keys are made by your eStock Manager provider for one Install ID and do not work on any other computer.')}
+  body.innerHTML = `${head('Licence', 'Every computer needs its own licence key. Keys are made by TechAlpha Hub for one Install ID and do not work on any other computer.')}
     <div class="form-narrow stack">
       <div class="figures figures-3"><div><span>Status</span><b>${state}</b></div>
         <div><span>${s.state === 'licensed' ? 'Activated on' : 'Trial'}</span><b>${s.state === 'licensed' ? esc(dateLabel(s.licensed_since)) : `${s.trial_days_left} of ${s.trial_days} days left`}</b></div>
         <div><span>Valid until</span><b>${s.state === 'licensed' ? (s.expires_on ? esc(dateLabel(s.expires_on)) : 'No end date') : '—'}</b></div></div>
       <p class="muted">${esc(s.message)}</p>
       <div class="install-id"><span class="field-label">This computer's Install ID</span><div class="install-id-row"><code>${esc(s.install_id)}</code></div></div>
+      ${vendorBlock()}
       <div><button class="btn ${s.state === 'licensed' ? 'btn-ghost' : 'btn-primary'}" data-activate>${icon('key', 16)} ${s.state === 'licensed' ? 'Enter a new key' : 'Activate'}</button></div>
     </div>`;
   $('[data-activate]', body)!.addEventListener('click', () => activationDialog(s, () => licenceSection(body)));
+  wireVendor(body, s.install_id);
 }
 
 // ---------------------------------------------------------------- updates
 
 async function updates(body: HTMLElement) {
   const version = await appVersion();
+  if (isMobile) {
+    body.innerHTML = `${head('Updates', 'On Android, new versions are installed from the latest APK file. Your data stays on the phone when you install over the old version.')}
+      <div class="form-narrow stack">
+        <div class="figures figures-2"><div><span>This version</span><b>${esc(version || 'Unknown')}</b></div><div><span>Where to get updates</span><b>GitHub releases</b></div></div>
+        <ol class="steps-list"><li>Tap <b>Get the latest version</b>.</li><li>Download the file ending in <b>_android.apk</b>.</li><li>Open it and tap <b>Update</b>. Allow installing from your browser if Android asks.</li></ol>
+        <div><button class="btn btn-primary" data-dl>${icon('download', 16)} Get the latest version</button></div>
+      </div>`;
+    $('[data-dl]', body)!.addEventListener('click', () => openExternal(RELEASES_URL));
+    return;
+  }
   body.innerHTML = `${head('Updates', 'New versions are published by your provider. eStock Manager checks when an owner or manager signs in, and installs only updates signed by the provider.')}
     <div class="form-narrow stack">
       <div class="figures figures-2"><div><span>This version</span><b>${esc(version || 'Unknown')}</b></div><div><span>Status</span><b data-ustate>Checking…</b></div></div>

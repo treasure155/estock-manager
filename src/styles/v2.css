@@ -126,3 +126,9 @@
 .pline .pline-qty > input { width: 72px !important; flex: none; }
 .pline .pline-qty > select { flex: 1; min-width: 0 !important; width: auto !important; }
 .pline > * { min-width: 0; }
+
+/* Where to buy a licence key */
+.vendor-box { display: flex; flex-direction: column; gap: 8px; padding: 14px 16px; border-radius: var(--r); background: var(--brand-soft); border: 1px solid var(--brand-line); }
+.vendor-head { display: flex; flex-direction: column; gap: 2px; }
+.vendor-head span { font-weight: 700; color: var(--brand-text); font-size: 13.5px; }
+.vendor-actions { display: flex; flex-wrap: wrap; gap: 8px; }

@@ -47,11 +47,16 @@ fn print_window(window: tauri::WebviewWindow) -> Result<(), String> {
 pub fn run() {
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_process::init());
+        .plugin(tauri_plugin_opener::init());
     #[cfg(desktop)]
     {
-        builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+        builder = builder
+            .plugin(tauri_plugin_process::init())
+            .plugin(tauri_plugin_updater::Builder::new().build());
+    }
+    #[cfg(mobile)]
+    {
+        builder = builder.plugin(tauri_plugin_barcode_scanner::init());
     }
     builder
         .setup(|app| {

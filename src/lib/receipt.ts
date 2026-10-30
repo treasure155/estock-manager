@@ -3,6 +3,7 @@ import { store } from '../store';
 import type { Receipt } from '../types';
 import { esc, toast, errText } from './dom';
 import { dateTimeLabel, money, qty } from './format';
+import { isAndroid } from './platform';
 
 const statusText: Record<string, string> = { paid: 'Paid', partial: 'Part paid', unpaid: 'Not paid', void: 'Void' };
 
@@ -57,12 +58,17 @@ export function receiptMarkup(r: Receipt, opts: { width?: string } = {}): string
 
 /** Puts the receipt in the print-only area and opens the system print dialog. */
 export async function printReceipt(r: Receipt) {
+  if (isAndroid) { const { printReceiptAndroid } = await import('./escpos'); return printReceiptAndroid(r); }
   const width = store.settings.receipt_width_mm || '80';
   await printHtml(receiptMarkup(r, { width }), width === 'a4' ? '@page { size: A4; margin: 14mm; }' : `@page { size: ${width}mm auto; margin: 3mm 2mm; }`);
 }
 
 /** Prints any markup through the print-only area (used for receipts and the recovery key sheet). */
 export async function printHtml(html: string, pageCss = '@page { size: A4; margin: 18mm; }') {
+  if (isAndroid) {
+    toast('Printing this page needs the Windows or Mac app. On Android you can print receipts (through RawBT) and send statements on WhatsApp.', 'info');
+    return;
+  }
   const area = document.getElementById('print-area')!;
   area.innerHTML = html;
   let style = document.getElementById('page-size') as HTMLStyleElement | null;

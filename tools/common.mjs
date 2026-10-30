@@ -9,6 +9,8 @@ export const LICENSE_PRIVATE = join(KEY_DIR, 'license-private.pem');
 export const UPDATER_KEY = join(KEY_DIR, 'updater.key');
 export const UPDATER_PASSWORD = join(KEY_DIR, 'updater-password.txt');
 export const ISSUED_LOG = join(KEY_DIR, 'issued-licences.csv');
+export const ANDROID_KEYSTORE = join(KEY_DIR, 'android-release.p12');
+export const ANDROID_PASSWORD = join(KEY_DIR, 'android-keystore-password.txt');
 export const PUBLIC_KEY_FILE = join(ROOT, 'src-tauri', 'license_public_key.txt');
 export const TAURI_CONF = join(ROOT, 'src-tauri', 'tauri.conf.json');
 

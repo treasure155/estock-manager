@@ -7,10 +7,11 @@
 // Safe to run again: existing keys are never overwritten.
 //
 //   npm run setup-keys
-import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync, unlinkSync } from 'node:fs';
+import { join } from 'node:path';
 import { generateKeyPairSync, createPrivateKey, createPublicKey, randomBytes } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { KEY_DIR, LICENSE_PRIVATE, UPDATER_KEY, UPDATER_PASSWORD, PUBLIC_KEY_FILE, TAURI_CONF, ROOT } from './common.mjs';
+import { KEY_DIR, LICENSE_PRIVATE, UPDATER_KEY, UPDATER_PASSWORD, PUBLIC_KEY_FILE, TAURI_CONF, ROOT, ANDROID_KEYSTORE, ANDROID_PASSWORD } from './common.mjs';
 
 const say = (m) => console.log(m);
 mkdirSync(KEY_DIR, { recursive: true, mode: 0o700 });
@@ -42,17 +43,35 @@ conf.plugins.updater.pubkey = updaterPub;
 writeFileSync(TAURI_CONF, JSON.stringify(conf, null, 2) + '\n');
 say('✔ Wrote update public key to src-tauri/tauri.conf.json');
 
+// 2b. Android app signing key. Android only accepts an update signed with the
+//     same key as the installed app, so this is made once and never replaced.
+if (!existsSync(ANDROID_KEYSTORE)) {
+  const pw = randomBytes(18).toString('base64url');
+  const tmpKey = join(KEY_DIR, '.android-key.pem'), tmpCert = join(KEY_DIR, '.android-cert.pem');
+  const run = (args) => spawnSync('openssl', args, { stdio: 'inherit' }).status === 0;
+  const ok = run(['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', tmpKey, '-out', tmpCert, '-days', '10950', '-subj', '/CN=TechAlpha Hub/O=TechAlpha Global Concept/C=NG'])
+    && run(['pkcs12', '-export', '-in', tmpCert, '-inkey', tmpKey, '-name', 'estock', '-out', ANDROID_KEYSTORE, '-passout', `pass:${pw}`]);
+  try { unlinkSync(tmpKey); unlinkSync(tmpCert); } catch { /* already gone */ }
+  if (!ok) { console.error('✘ Could not create the Android signing key (openssl is needed).'); process.exit(1); }
+  writeFileSync(ANDROID_PASSWORD, pw, { mode: 0o600 });
+  try { chmodSync(ANDROID_KEYSTORE, 0o600); } catch { /* Windows */ }
+  say(`✔ Created Android signing key: ${ANDROID_KEYSTORE}`);
+} else say(`• Android signing key already exists: ${ANDROID_KEYSTORE}`);
+
 // 3. GitHub secrets for the build machines
 const gh = spawnSync('gh', ['auth', 'status'], { stdio: 'ignore', cwd: ROOT, shell: process.platform === 'win32' });
 if (gh.status === 0) {
   const set = (name, value) => spawnSync('gh', ['secret', 'set', name], { input: value, cwd: ROOT, stdio: ['pipe', 'inherit', 'inherit'], shell: process.platform === 'win32' }).status === 0;
-  const ok = set('TAURI_SIGNING_PRIVATE_KEY', readFileSync(UPDATER_KEY, 'utf8')) && set('TAURI_SIGNING_PRIVATE_KEY_PASSWORD', readFileSync(UPDATER_PASSWORD, 'utf8'));
+  const ok = set('TAURI_SIGNING_PRIVATE_KEY', readFileSync(UPDATER_KEY, 'utf8')) && set('TAURI_SIGNING_PRIVATE_KEY_PASSWORD', readFileSync(UPDATER_PASSWORD, 'utf8'))
+    && set('ANDROID_KEYSTORE_BASE64', readFileSync(ANDROID_KEYSTORE).toString('base64')) && set('ANDROID_KEYSTORE_PASSWORD', readFileSync(ANDROID_PASSWORD, 'utf8'));
   say(ok ? '✔ Saved the update key to GitHub secrets' : '✘ Could not save GitHub secrets (see message above)');
 } else {
   say('\n! GitHub CLI not signed in. Add these two secrets by hand on GitHub:');
   say('  Repo → Settings → Secrets and variables → Actions → New repository secret');
   say(`  TAURI_SIGNING_PRIVATE_KEY           = contents of ${UPDATER_KEY}`);
   say(`  TAURI_SIGNING_PRIVATE_KEY_PASSWORD  = contents of ${UPDATER_PASSWORD}`);
+  say(`  ANDROID_KEYSTORE_BASE64             = base64 of ${ANDROID_KEYSTORE}   (Mac: base64 -i "${ANDROID_KEYSTORE}" | pbcopy)`);
+  say(`  ANDROID_KEYSTORE_PASSWORD           = contents of ${ANDROID_PASSWORD}`);
 }
 
 say(`\nIMPORTANT: back up the folder ${KEY_DIR} (e.g. to a flash drive).`);

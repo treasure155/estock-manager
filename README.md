@@ -1,6 +1,6 @@
 # eStock Manager
 
-Offline-first inventory, point of sale and receipt app for **any business that sells goods or services**: supermarkets and provision stores, eateries, dry cleaners and laundries, broiler and poultry farms, farm produce sellers, boutiques, pharmacies, salons and more.
+Offline-first inventory, point of sale and receipt app for **Windows, macOS and Android**, for **any business that sells goods or services**: supermarkets and provision stores, eateries, dry cleaners and laundries, broiler and poultry farms, farm produce sellers, boutiques, pharmacies, salons and more.
 
 Built with **Tauri 2 + Rust + SQLite** (backend) and **TypeScript + Vite** (frontend). It runs as a desktop app on Windows and macOS, keeps all data on the computer, and works without internet. Internet is needed only for emailing receipts.
 
@@ -79,6 +79,7 @@ Two key pairs protect the app. Their **private halves live only on the admin's c
 |---|---|---|---|
 | Licence signing (Ed25519) | `~/.estock-keys/license-private.pem` | `src-tauri/license_public_key.txt` | Making licence keys |
 | Update signing (minisign) | `~/.estock-keys/updater.key` + `updater-password.txt` | `plugins.updater.pubkey` in `src-tauri/tauri.conf.json` | Signing installers so installed apps accept updates |
+| Android app signing (PKCS12) | `~/.estock-keys/android-release.p12` + `android-keystore-password.txt` | none (stored as GitHub secrets) | Signing the APK; phones only accept updates signed with the same key |
 
 ### One-time setup (admin computer)
 
@@ -87,7 +88,7 @@ npm install
 npm run setup-keys
 ```
 
-This creates both key pairs (never overwrites existing ones), writes the two public keys into the project and, if the GitHub CLI (`gh`) is signed in, stores `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` as repository secrets. Without `gh`, it prints the two values to paste under GitHub → repo → Settings → Secrets and variables → Actions.
+This creates the three keys (never overwrites existing ones), writes the two public keys into the project and, if the GitHub CLI (`gh`) is signed in, stores `TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`, `ANDROID_KEYSTORE_BASE64` and `ANDROID_KEYSTORE_PASSWORD` as repository secrets. Without `gh`, it prints the four values to paste under GitHub → repo → Settings → Secrets and variables → Actions.
 
 ### Issue a licence (one per computer)
 
@@ -246,3 +247,18 @@ estock-manager/
 - Using the key replaces it with a new one, which is shown once. Answers are not case-sensitive.
 - After 5 wrong recovery attempts, recovery is locked for 10 minutes. Every attempt is listed under **Settings → Security & recovery**, where the owner can also create a new key or change the questions (both need the current password).
 - For databases upgraded from an earlier version, the owner sees a "Set up account recovery" notice on the Overview page until both are set.
+
+## Android app
+
+The same code builds an Android app (APK) in the release workflow. Differences on Android:
+
+- **Layout:** phone layout with a slide-out menu; the till shows items, then the sale with the pay button pinned at the bottom.
+- **Barcodes:** a **Scan** button on New sale uses the phone camera (USB/Bluetooth scanners also work).
+- **Receipt printing:** through the free **RawBT Print Service** app (Play Store), which drives 58/80 mm Bluetooth and USB thermal printers. Other pages (labels, statements, Z reports) print from the desktop app; statements can be sent on WhatsApp.
+- **Updates:** install the newer `_android.apk` from Releases over the old one (Settings → Updates has the link). Data is kept because every APK is signed with the same key.
+- **Licence:** the Install ID is created on first run and stays the same until the app is uninstalled.
+- **Backups:** saved to the app's Documents folder on the phone.
+
+Install on a phone: download `eStock-Manager_X.Y.Z_android.apk` from Releases on the phone, open it and allow installing from the browser when Android asks.
+
+`tools/check-update.mjs` (`node tools/check-update.mjs`) checks that the published desktop update matches your signing key.

@@ -950,7 +950,7 @@ checksum = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555"
 
 [[package]]
 name = "eatery-manager"
-version = "2.0.0"
+version = "3.1.0"
 dependencies = [
  "argon2",
  "base64 0.22.1",
@@ -965,6 +965,7 @@ dependencies = [
  "sha2",
  "tauri",
  "tauri-build",
+ "tauri-plugin-barcode-scanner",
  "tauri-plugin-dialog",
  "tauri-plugin-opener",
  "tauri-plugin-process",
@@ -4134,6 +4135,20 @@ dependencies = [
  "serde_json",
  "tauri-utils",
  "walkdir",
+]
+
+[[package]]
+name = "tauri-plugin-barcode-scanner"
+version = "2.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b57ad7e6ed3e8927205dade785400d9829b8208f59cfe24324fcb324f61482b2"
+dependencies = [
+ "log",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-plugin",
+ "thiserror 2.0.21",
 ]
 
 [[package]]

@@ -10,11 +10,13 @@ import './styles/app.css';
 import './styles/views.css';
 import './styles/print.css';
 import './styles/v2.css';
+import './styles/mobile.css';
 
 import { auth } from './api';
 import { esc, toast } from './lib/dom';
 import { licence, renderLicenceScreen } from './lib/license-ui';
 import { checkForUpdate } from './lib/updater';
+import { isMobile } from './lib/platform';
 import { applyTheme } from './lib/theme';
 import { store } from './store';
 import type { SessionInfo } from './types';
@@ -30,7 +32,7 @@ async function signedIn(session: SessionInfo) {
   applyTheme(store.settings.theme_primary, store.settings.theme_secondary, store.settings.theme_mode);
   shell = mountShell(app, signOut);
   showTrialBanner();
-  if (auth.can('manager')) checkUpdatesQuietly();
+  if (auth.can('manager') && !isMobile) checkUpdatesQuietly();
 }
 
 function showTrialBanner() {

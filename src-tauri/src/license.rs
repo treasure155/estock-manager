@@ -74,7 +74,11 @@ pub fn format_install_id(hash: &[u8; 10]) -> String {
 
 /// The machine identity. Falls back to an ID stored in the app config folder
 /// when the operating system does not provide one.
+/// On Android there is no machine ID available to apps, so a random ID is
+/// created on first run and kept in the app's private config folder
+/// (it changes only if the app is uninstalled).
 fn machine_identity(app: &tauri::AppHandle) -> String {
+    #[cfg(desktop)]
     if let Ok(id) = machine_uid::get() {
         if !id.trim().is_empty() { return id.trim().to_string(); }
     }
