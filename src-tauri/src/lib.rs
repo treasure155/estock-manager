@@ -38,9 +38,18 @@ impl AppState {
 
 /// Opens the operating system print dialog for the current window. Used instead
 /// of `window.print()`, which some platform webviews ignore.
+#[cfg(desktop)]
 #[tauri::command]
 fn print_window(window: tauri::WebviewWindow) -> Result<(), String> {
     window.print().map_err(|e| format!("Could not open the print dialog: {e}"))
+}
+
+/// `WebviewWindow::print` does not exist on Android/iOS. Returning an error
+/// makes the UI fall back to `window.print()`, which the mobile webview supports.
+#[cfg(mobile)]
+#[tauri::command]
+fn print_window() -> Result<(), String> {
+    Err("Native print dialog is not available on mobile".to_string())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
