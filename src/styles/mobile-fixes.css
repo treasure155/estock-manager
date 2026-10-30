@@ -5,6 +5,10 @@
    - Everything stays clear of the status bar and the navigation bar. */
 :root { --safe-t: env(safe-area-inset-top, 0px); --safe-b: env(safe-area-inset-bottom, 0px); }
 
+/* Install ID row: the code and its Copy / WhatsApp buttons wrap instead of squeezing */
+.install-id-row { flex-wrap: wrap; }
+.install-id-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
 @media (max-width: 760px) {
   #app { height: 100vh; height: 100dvh; padding: var(--safe-t) 0 var(--safe-b); }
   .shell { display: block; height: 100%; }
@@ -50,4 +54,25 @@
   /* Receipt pop-up: Print / WhatsApp / Email first, the paper below */
   .receipt-view { display: flex; flex-direction: column; gap: 14px; }
   .receipt-view .receipt-side { order: -1; position: static; }
+
+  /* Rows of buttons, tabs and categories wrap, so every one is visible without sideways scrolling */
+  .topbar-actions { flex-wrap: wrap; overflow: visible; }
+  .topbar-actions .btn { flex: 1 1 auto; justify-content: center; }
+  .settings-nav { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; overflow: visible; }
+  .settings-nav button { white-space: normal; border: 1px solid var(--line); background: var(--surface); padding: 10px; }
+  .chips { flex-wrap: wrap; overflow: visible; }
+  .tabs, .panel-head { flex-wrap: wrap; }
+
+  /* Tables become stacked cards: every column and every button is on screen (cell headings are added by lib/enhance.ts) */
+  .table-scroll { overflow-x: visible; }
+  .table, .table tbody, .table tfoot, .table tr, .table td, .table th { display: block; width: auto; }
+  .table thead { display: none; }
+  .table tr { padding: 12px 14px; border-bottom: 1px solid var(--line); }
+  .table tbody tr:last-child { border-bottom: 0; }
+  .table td, .table th { padding: 2px 0; border: 0; text-align: left; white-space: normal; position: static; background: none; }
+  .table td:first-child, .table th:first-child { padding: 0 0 4px; font-size: 15px; }
+  .table .num { text-align: left; white-space: normal; }
+  .table td[data-label]:not([data-label=""]):not(:first-child)::before { content: attr(data-label) ": "; color: var(--muted); font-weight: 600; font-size: 12.5px; }
+  .table .actions-col { width: auto; text-align: left; padding-top: 6px; }
+  .table tfoot tr { background: var(--surface-2); font-weight: 700; }
 }

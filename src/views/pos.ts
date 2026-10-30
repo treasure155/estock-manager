@@ -4,6 +4,7 @@ import { money, nairaInput, qty, toKobo } from '../lib/format';
 import { icon } from '../lib/icons';
 import { printReceipt, receiptMarkup } from '../lib/receipt';
 import { receiptText, shareWhatsApp } from '../lib/whatsapp';
+import { shareReceipt } from '../lib/receipt-pdf';
 import { store } from '../store';
 import type { Customer, HeldSale, Product, Receipt, ShiftReport } from '../types';
 import type { ViewCtx } from './shell';
@@ -569,7 +570,7 @@ export function showReceipt(r: Receipt, opts: { fresh?: boolean; onChange?: () =
       ${opts.fresh ? `<button class="btn btn-ghost btn-block" data-close>${icon('plus', 16)} Start next sale</button>` : ''}
     </div></div>` });
   $('[data-print]', m.el)!.addEventListener('click', () => printReceipt(r));
-  $('[data-wa]', m.el)!.addEventListener('click', () => shareWhatsApp(r.customer_phone, receiptText(r)));
+  $('[data-wa]', m.el)!.addEventListener('click', () => shareReceipt(r, () => shareWhatsApp(r.customer_phone, receiptText(r))));
   const form = $<HTMLFormElement>('[data-email]', m.el)!;
   form.addEventListener('submit', (e) => {
     e.preventDefault();

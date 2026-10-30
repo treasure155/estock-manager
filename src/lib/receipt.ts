@@ -58,7 +58,7 @@ export function receiptMarkup(r: Receipt, opts: { width?: string } = {}): string
 
 /** Puts the receipt in the print-only area and opens the system print dialog. */
 export async function printReceipt(r: Receipt) {
-  if (isAndroid) { const { printReceiptAndroid } = await import('./escpos'); return printReceiptAndroid(r); }
+  if (isAndroid) { const { printReceiptAndroidPdf } = await import('./receipt-pdf'); return printReceiptAndroidPdf(r); }
   const width = store.settings.receipt_width_mm || '80';
   await printHtml(receiptMarkup(r, { width }), width === 'a4' ? '@page { size: A4; margin: 14mm; }' : `@page { size: ${width}mm auto; margin: 3mm 2mm; }`);
 }

@@ -5,6 +5,7 @@ import { dateLabel, isoDate, money, nairaInput, qty, relativeDay, toKobo } from 
 import { icon } from '../lib/icons';
 import { printReceipt, receiptMarkup } from '../lib/receipt';
 import { receiptText, shareWhatsApp } from '../lib/whatsapp';
+import { shareReceipt } from '../lib/receipt-pdf';
 import { store } from '../store';
 import type { Receipt, ReceiptSummary } from '../types';
 import type { ViewCtx } from './shell';
@@ -120,7 +121,7 @@ function openReceipt(r: Receipt, onChange: () => void) {
   const refresh = async (next: Receipt) => { m.close(); onChange(); openReceipt(next, onChange); };
   $('[data-print]', m.el)!.addEventListener('click', () => printReceipt(r));
   $('[data-email]', m.el)!.addEventListener('click', () => emailDialog(r, onChange));
-  $('[data-wa]', m.el)!.addEventListener('click', () => shareWhatsApp(r.customer_phone, receiptText(r)));
+  $('[data-wa]', m.el)!.addEventListener('click', () => shareReceipt(r, () => shareWhatsApp(r.customer_phone, receiptText(r))));
   $('[data-return]', m.el)?.addEventListener('click', () => returnDialog(r, refresh));
   $('[data-pay]', m.el)?.addEventListener('click', () => paymentDialog(r, refresh));
   m.el.querySelectorAll<HTMLButtonElement>('[data-fulfil]').forEach((b) => b.addEventListener('click', () => withBusy(b, async () => {

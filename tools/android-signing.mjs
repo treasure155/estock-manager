@@ -5,6 +5,7 @@
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { ROOT } from './common.mjs';
+import './android-native.mjs';
 
 const b64 = process.env.ANDROID_KEYSTORE_BASE64, pw = process.env.ANDROID_KEYSTORE_PASSWORD;
 if (!b64 || !pw) { console.error('✘ GitHub secrets ANDROID_KEYSTORE_BASE64 / ANDROID_KEYSTORE_PASSWORD are missing. Run npm run setup-keys and add them.'); process.exit(1); }
