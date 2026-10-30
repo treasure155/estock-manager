@@ -1,6 +1,6 @@
 # Builds the signed Android APK and adds it to the GitHub release for the
 # version in package.json. Called by release.yml, and can also be run on its
-# own from the Actions tab ("Android APK" → Run workflow) without rebuilding
+# own from the Actions tab ("Android APK" -> Run workflow) without rebuilding
 # or touching the Windows and Mac files.
 name: Android APK
 
@@ -83,10 +83,15 @@ jobs:
           echo "file=eStock-Manager_${VERSION}_android.apk" >> "$GITHUB_OUTPUT"
           echo "tag=v${VERSION}" >> "$GITHUB_OUTPUT"
 
-      - name: Add the APK to the release
-        uses: softprops/action-gh-release@v2
+      # Keep a copy on the run page too, so the APK is never lost if attaching it
+      # to the release fails (Actions run -> Artifacts).
+      - name: Keep the APK with this run
+        uses: actions/upload-artifact@v4
         with:
-          tag_name: ${{ steps.apk.outputs.tag }}
-          files: ${{ steps.apk.outputs.file }}
-          draft: false
-          prerelease: false
+          name: eStock-Manager-android-apk
+          path: ${{ steps.apk.outputs.file }}
+
+      - name: Add the APK to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ steps.apk.outputs.tag }}" "${{ steps.apk.outputs.file }}" --clobber --repo "${{ github.repository }}"
