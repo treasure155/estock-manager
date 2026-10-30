@@ -11,6 +11,8 @@ import './styles/views.css';
 import './styles/print.css';
 import './styles/v2.css';
 import './styles/mobile.css';
+import './styles/mobile-fixes.css';
+import './lib/insets';
 
 import { auth } from './api';
 import { esc, toast } from './lib/dom';
