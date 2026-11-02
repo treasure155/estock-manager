@@ -8,11 +8,13 @@ import type { BackupStatus, PaymentMethod, Receipt } from '../types';
 import { activationDialog, licence, vendorBlock, wireVendor } from '../lib/license-ui';
 import { appVersion, checkForUpdate, installUpdate } from '../lib/updater';
 import { isMobile, openExternal, RELEASES_URL } from '../lib/platform';
+import { VENDOR } from '../lib/vendor';
+import { shareWhatsApp } from '../lib/whatsapp';
 import { dateLabel, relativeDay } from '../lib/format';
 import type { ViewCtx } from './shell';
 import { questionFields, readQuestions, wireQuestionFields } from './recovery-ui';
 
-type Section = 'business' | 'receipts' | 'selling' | 'appearance' | 'email' | 'payments' | 'type' | 'security' | 'backup' | 'licence' | 'updates' | 'account';
+type Section = 'business' | 'receipts' | 'selling' | 'appearance' | 'email' | 'payments' | 'type' | 'security' | 'backup' | 'licence' | 'updates' | 'account' | 'about';
 const SECTIONS: Array<{ key: Section; label: string; icon: string; owner: boolean }> = [
   { key: 'business', label: 'Business profile', icon: 'store', owner: true },
   { key: 'receipts', label: 'Receipts & tax', icon: 'receipt', owner: true },
@@ -25,7 +27,8 @@ const SECTIONS: Array<{ key: Section; label: string; icon: string; owner: boolea
   { key: 'backup', label: 'Backup', icon: 'download', owner: true },
   { key: 'licence', label: 'Licence', icon: 'key', owner: true },
   { key: 'updates', label: 'Updates', icon: 'refresh', owner: true },
-  { key: 'account', label: 'My account', icon: 'key', owner: false },
+  { key: 'account', label: 'My account', icon: 'user', owner: false },
+  { key: 'about', label: 'About & contact', icon: 'info', owner: false },
 ];
 
 const PROVIDERS: Record<string, { name: string; host: string; port: string; security: string; help: string }> = {
@@ -45,11 +48,26 @@ let section: Section = 'business';
 
 export async function render(ctx: ViewCtx) {
   const owner = auth.can('owner');
-  if (!owner) section = 'account';
-  else if (ctx.params.section) section = ctx.params.section as Section;
-  ctx.header('Settings', owner ? 'Make the app fit your business.' : 'Your account.');
-  await store.loadSettings();
   const visible = SECTIONS.filter((s) => owner || !s.owner);
+  const asked = ctx.params.section as Section | undefined;
+  if (asked && visible.some((v) => v.key === asked)) section = asked;
+  else if (!visible.some((v) => v.key === section)) section = visible[0].key;
+  await store.loadSettings();
+  // Phones: a list of sections as tiles; each opens on its own page (Back returns to the list).
+  if (window.matchMedia('(max-width: 760px)').matches) {
+    if (!asked) {
+      ctx.header('Settings', owner ? 'Make the app fit your business.' : 'Your account.');
+      ctx.main.innerHTML = `<div class="subtile-grid one">${visible.map((v) => `<button type="button" class="subtile" data-open-sec="${v.key}"><span class="subtile-icon">${icon(v.icon, 22)}</span><span class="subtile-text"><b>${esc(v.label)}</b></span>${icon('chevron', 16)}</button>`).join('')}</div>`;
+      ctx.main.onclick = (e) => { const b = (e.target as HTMLElement).closest<HTMLElement>('[data-open-sec]'); if (b) ctx.go('settings', { section: b.dataset.openSec }); };
+      return;
+    }
+    ctx.header(visible.find((v) => v.key === section)?.label ?? 'Settings');
+    applyTheme(store.settings.theme_primary, store.settings.theme_secondary, store.settings.theme_mode);
+    ctx.main.innerHTML = '<div class="settings-body solo" data-body></div>';
+    await SECTION_FNS[section]($('[data-body]', ctx.main)!, ctx);
+    return;
+  }
+  ctx.header('Settings', owner ? 'Make the app fit your business.' : 'Your account and the app.');
   ctx.main.innerHTML = `<div class="settings">
     <nav class="settings-nav" aria-label="Settings sections">${visible.map((s) => `<button data-sec="${s.key}" class="${s.key === section ? 'is-on' : ''}">${icon(s.icon, 17)}<span>${s.label}</span></button>`).join('')}</nav>
     <div class="settings-body" data-body></div></div>`;
@@ -59,7 +77,7 @@ export async function render(ctx: ViewCtx) {
     // Leaving the colour section without saving restores the saved theme.
     applyTheme(store.settings.theme_primary, store.settings.theme_secondary, store.settings.theme_mode);
     body.innerHTML = '';
-    await ({ business, receipts, selling, appearance, email, payments, type: businessType, security, backup, licence: licenceSection, updates, account } as Record<Section, (b: HTMLElement, c: ViewCtx) => Promise<void> | void>)[section](body, ctx);
+    await SECTION_FNS[section](body, ctx);
   };
   ctx.main.addEventListener('click', (e) => {
     const b = (e.target as HTMLElement).closest<HTMLElement>('[data-sec]');
@@ -67,6 +85,8 @@ export async function render(ctx: ViewCtx) {
   });
   await show();
 }
+
+const SECTION_FNS = { business, receipts, selling, appearance, email, payments, type: businessType, security, backup, licence: licenceSection, updates, account, about } as Record<Section, (b: HTMLElement, c: ViewCtx) => Promise<void> | void>;
 
 async function save(values: Record<string, string>, btn: HTMLButtonElement | null, after?: () => void) {
   await withBusy(btn, async () => {
@@ -518,6 +538,38 @@ async function updates(body: HTMLElement) {
 }
 
 // ---------------------------------------------------------------- account
+
+// ---------------------------------------------------------------- about
+
+async function about(body: HTMLElement) {
+  const version = await appVersion();
+  const lic = await licence.refresh();
+  const platformName = isMobile ? 'Android' : /Mac/i.test(navigator.userAgent) ? 'macOS' : /Win/i.test(navigator.userAgent) ? 'Windows' : 'Desktop';
+  body.classList.add('about-sec');
+  body.innerHTML = `${head('About eStock Manager', 'Inventory, sales and receipts for any business. Works offline on Windows, Mac and Android.')}
+    <div class="form-narrow stack">
+      <div class="about-card">
+        <img src="/logo-mark.svg" alt="" class="about-logo">
+        <div><b>eStock Manager</b><span>Version ${esc(version || '—')} · ${esc(platformName)}</span>
+        <span>${lic ? (lic.state === 'licensed' ? `Licensed${lic.expires_on ? ` until ${esc(dateLabel(lic.expires_on))}` : ''}` : lic.state === 'trial' ? `Free trial, ${lic.trial_days_left} day${lic.trial_days_left === 1 ? '' : 's'} left` : 'Not activated') : ''}</span></div>
+      </div>
+      <h3>Contact us</h3>
+      <div class="contact-list">
+        <div><span>Company</span><b>${esc(VENDOR.name)}</b></div>
+        <div><span>WhatsApp / phone</span><b>${esc(VENDOR.phoneDisplay)}</b></div>
+        <div><span>Email</span><b>${esc(VENDOR.email)}</b></div>
+        <div><span>Licence</span><b>${VENDOR.prices.map(esc).join(' · ')}</b></div>
+      </div>
+      <div class="row-actions about-actions">
+        <button type="button" class="btn btn-primary" data-about-wa>${icon('chat', 16)} Chat on WhatsApp</button>
+        <button type="button" class="btn btn-ghost" data-about-mail>${icon('mail', 16)} Send an email</button>
+      </div>
+      <p class="muted small">Built by TechAlpha Global Concept. Your records stay on this ${isMobile ? 'phone' : 'computer'}; nothing is sent anywhere unless you email or WhatsApp it.</p>
+    </div>`;
+  const hello = `Hello ${VENDOR.name}, I use eStock Manager ${version} (${platformName}).${lic ? ` Install ID: ${lic.install_id}.` : ''}\n`;
+  $('[data-about-wa]', body)!.addEventListener('click', () => shareWhatsApp(VENDOR.whatsapp, hello));
+  $('[data-about-mail]', body)!.addEventListener('click', () => openExternal(`mailto:${VENDOR.email}?subject=${encodeURIComponent('eStock Manager')}&body=${encodeURIComponent(hello)}`));
+}
 
 function account(body: HTMLElement) {
   const s = auth.session!;

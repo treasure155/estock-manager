@@ -70,7 +70,7 @@ jobs:
         run: node tools/android-signing.mjs
 
       - name: Build the APK
-        run: npx tauri android build --apk --target aarch64 armv7
+        run: npx tauri android build --apk --target aarch64 armv7 i686 x86_64
 
       - name: Name the APK
         id: apk

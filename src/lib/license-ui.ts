@@ -5,6 +5,7 @@ import { dateLabel } from './format';
 import { icon } from './icons';
 import { keyRequestText, VENDOR } from './vendor';
 import { shareWhatsApp } from './whatsapp';
+import { openExternal } from './platform';
 
 let current: LicenseStatus | null = null;
 export const licence = {
@@ -38,8 +39,7 @@ export function wireVendor(root: HTMLElement, installId: string) {
   $('[data-req-wa]', root)?.addEventListener('click', async () => shareWhatsApp(VENDOR.whatsapp, keyRequestText(installId, await business())));
   $('[data-req-mail]', root)?.addEventListener('click', async () => {
     const url = `mailto:${VENDOR.email}?subject=${encodeURIComponent(`eStock Manager licence key: ${installId}`)}&body=${encodeURIComponent(keyRequestText(installId, await business()))}`;
-    try { const { openUrl } = await import('@tauri-apps/plugin-opener'); await openUrl(url); }
-    catch { window.location.href = url; }
+    await openExternal(url);
   });
 }
 

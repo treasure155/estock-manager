@@ -12,6 +12,7 @@ import './styles/print.css';
 import './styles/v2.css';
 import './styles/mobile.css';
 import './styles/mobile-fixes.css';
+import './styles/app2.css';
 import './lib/insets';
 import './lib/enhance';
 

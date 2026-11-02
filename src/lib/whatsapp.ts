@@ -1,6 +1,6 @@
 import { store } from '../store';
 import type { Receipt, Statement } from '../types';
-import { toast, errText } from './dom';
+import { openExternal } from './platform';
 import { dateLabel, dateTimeLabel, money, qty } from './format';
 
 /** Turns a local number like 0803 123 4567 into the international form WhatsApp needs (2348031234567). */
@@ -18,14 +18,7 @@ export function waNumber(phone: string): string {
 export async function shareWhatsApp(phone: string, text: string) {
   const num = phone.trim() ? waNumber(phone) : '';
   const url = `https://wa.me/${num}?text=${encodeURIComponent(text)}`;
-  try {
-    const { openUrl } = await import('@tauri-apps/plugin-opener');
-    await openUrl(url);
-  } catch (e) {
-    // Outside the desktop app (or if the opener is unavailable) fall back to the browser.
-    const w = window.open(url, '_blank', 'noopener');
-    if (!w) toast(`Could not open WhatsApp: ${errText(e)}`, 'error');
-  }
+  await openExternal(url);
 }
 
 const biz = () => store.settings.business_name || 'My Business';

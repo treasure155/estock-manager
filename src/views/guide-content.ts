@@ -44,6 +44,14 @@ export const GUIDE: GuideSection[] = [
     <p>Starting items come with typical Nigerian prices. Change any name, price or stock count in Inventory, or delete items you do not sell.</p>`,
   },
   {
+    id: 'navigate', title: 'Finding your way around',
+    html: `
+      <p>The <b>Home</b> screen shows today's sales and big tiles for each part of the app: <b>Sell</b>, <b>Stock</b>, <b>Money</b>, <b>Business</b> and <b>Help</b> (plus <b>Farm</b> when flocks are switched on). Tap a tile to see its pages, then tap the page you want.</p>
+      <p>On a phone, the bar at the bottom takes you to Home, Sell, Receipts, Customers and Menu (every page). The arrow at the top left, or the phone's back button, returns to the previous page.</p>
+      <p>On a computer, the buttons at the top right do the same, and <b>F2</b> opens New sale.</p>
+      <p><b>About &amp; contact</b> (Help tile, or tap your initials) shows the app version, your licence and how to reach TechAlpha Hub.</p>`,
+  },
+  {
     id: 'setup', title: 'First-time setup',
     html: `<p class="guide-lead">The first time the app opens it asks three short sets of questions. This is done once per computer.</p>
     <ol>

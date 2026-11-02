@@ -252,12 +252,15 @@ estock-manager/
 
 The same code builds an Android app (APK) in the release workflow. Differences on Android:
 
-- **Layout:** phone layout with a slide-out menu; the till shows items, then the sale with the pay button pinned at the bottom.
+- **Layout:** home screen with tiles (Sell, Stock, Money, Business, Help, and Farm when enabled). Tapping a tile opens its pages as a bottom sheet. A tab bar at the bottom (Home, Sell, Receipts, Customers, Menu) and the phone's back button move between pages.
+- **Android versions:** Android 7.0 (API 24) and newer, on phones and tablets (ARM 64/32-bit and x86). The Android build ships an extra compatibility bundle so it runs on old system WebViews too.
 - **Barcodes:** a **Scan** button on New sale uses the phone camera (USB/Bluetooth scanners also work).
 - **Receipt printing:** through the free **RawBT Print Service** app (Play Store), which drives 58/80 mm Bluetooth and USB thermal printers. Other pages (labels, statements, Z reports) print from the desktop app; statements can be sent on WhatsApp.
 - **Updates:** install the newer `_android.apk` from Releases over the old one (Settings → Updates has the link). Data is kept because every APK is signed with the same key.
 - **Licence:** the Install ID is created on first run and stays the same until the app is uninstalled.
 - **Backups:** saved to the app's Documents folder on the phone.
+
+About & contact (Menu → Help → About & contact, or tap your initials) shows the version, licence state and TechAlpha Hub contact details.
 
 Install on a phone: download `eStock-Manager_X.Y.Z_android.apk` from Releases on the phone, open it and allow installing from the browser when Android asks.
 
