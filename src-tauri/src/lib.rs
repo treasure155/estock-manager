@@ -16,6 +16,7 @@ mod reports;
 mod sales;
 mod settings;
 mod shifts;
+mod telemetry;
 mod templates;
 
 use rusqlite::Connection;
@@ -80,6 +81,7 @@ pub fn run() {
                 license: Mutex::new(Some(lic)),
             });
             backup::start_auto(app.handle().clone());
+            telemetry::start(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

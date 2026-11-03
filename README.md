@@ -32,6 +32,7 @@ Built with **Tauri 2 + Rust + SQLite** (backend) and **TypeScript + Vite** (fron
 | **Licensing** | 14-day free trial per computer, then a licence key made for that computer's Install ID. Keys are Ed25519-signed; only the admin's private key can create them. |
 | **Auto-update** | Signed updates from GitHub Releases. Owners/managers see a banner when a new version is out and install it from Settings → Updates. |
 | **How to** | The full user guide inside the app (Help → How to), with search and printing. It works offline. |
+| **Usage notice** | When online, one small notice to TechAlpha on first install and at most once a day (Install ID, version, device type, business name and type, licensed or not, and item/receipt/customer/staff totals). Never sales, prices, customer details or passwords. See `src-tauri/src/telemetry.rs`. |
 
 ## Requirements
 
@@ -237,6 +238,7 @@ estock-manager/
 - Licence keys are verified offline with an embedded Ed25519 public key; the private key never ships. The trial start is stored in two places and a clock-rollback guard stops trial extension by changing the date.
 - Updates are accepted only when signed with the release key (minisign), and are downloaded over HTTPS from GitHub Releases.
 - WhatsApp links are the only URLs the app may open (`https://wa.me/*`), plus the project's GitHub page.
+- The only network request the app makes on its own is the usage notice to `https://api.techalphahub.online/api/products/telemetry` (Rust side, 20-second timeout, retried every 15 minutes while offline).
 - SMTP credentials are stored in the local database, readable only through the Owner role in the app. Protect the Windows/macOS user account with a password, use a dedicated sending mailbox, and keep backups somewhere safe, since they contain your data.
 
 ## Account recovery (offline)

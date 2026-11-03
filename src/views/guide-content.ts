@@ -426,6 +426,16 @@ export const GUIDE: GuideSection[] = [
     </ul>`,
   },
   {
+    id: 'privacy', title: 'What the app sends to TechAlpha',
+    html: `<p class="guide-lead">eStock Manager works offline. When this device has internet, it sends TechAlpha one small notice the first time, and at most one a day after that.</p>
+    <p>This tells TechAlpha how many businesses use the app and which versions are in use, so we know who to tell about updates.</p>
+    ${table(['Sent', 'Never sent'], [[
+      'The Install ID, app version and device type; the business name and type from Settings; whether the app is licensed; the number of items, receipts, customers and staff accounts',
+      'Sales details, prices or amounts; customer names, phone numbers or emails; passwords; email settings; your database or backups',
+    ]])}
+    <p>If there is no internet, nothing is sent and nothing slows down. The app simply tries again later.</p>`,
+  },
+  {
     id: 'troubleshooting', title: 'Troubleshooting',
     html: table(['Problem', 'What to do'], [
       ['Forgot my password', 'Click <b>Forgot password?</b> on the sign-in screen, or ask the owner to reset it under Staff.'],
