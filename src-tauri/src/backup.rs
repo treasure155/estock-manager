@@ -18,7 +18,7 @@ pub fn default_dir(app: &tauri::AppHandle) -> PathBuf {
     app.path().document_dir().or_else(|_| app.path().home_dir()).unwrap_or_else(|_| std::env::temp_dir()).join("eStock Backups")
 }
 
-fn effective_dir(app: &tauri::AppHandle, conn: &Connection) -> PathBuf {
+pub(crate) fn effective_dir(app: &tauri::AppHandle, conn: &Connection) -> PathBuf {
     let custom = db::setting(conn, "backup_dir").unwrap_or_default();
     if custom.trim().is_empty() { default_dir(app) } else { PathBuf::from(custom.trim()) }
 }
@@ -57,7 +57,7 @@ fn prune(dir: &Path, keep: usize) {
     }
 }
 
-fn keep_count(conn: &Connection) -> usize {
+pub(crate) fn keep_count(conn: &Connection) -> usize {
     db::setting(conn, "backup_keep").ok().and_then(|v| v.parse::<usize>().ok()).unwrap_or(14).clamp(1, 365)
 }
 

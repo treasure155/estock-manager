@@ -39,7 +39,7 @@ fn normalize_answer(a: &str) -> String {
     a.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase()
 }
 
-fn log_event(conn: &Connection, event: &str, username: &str, detail: &str) {
+pub(crate) fn log_event(conn: &Connection, event: &str, username: &str, detail: &str) {
     let _ = conn.execute("INSERT INTO security_events(event,username,detail) VALUES(?1,?2,?3)", params![event, username, detail]);
 }
 

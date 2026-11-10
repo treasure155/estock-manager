@@ -30,8 +30,11 @@ Built with **Tauri 2 + Rust + SQLite** (backend) and **TypeScript + Vite** (fron
 | **Held sales & labels** | Park and resume sales. Print price labels with EAN-13 / Code 128 barcodes on A4 label sheets or a label printer. |
 | **Backup** | Automatic daily backup (default `Documents/eStock Backups`, newest 14 kept), custom folder (flash drive, Drive/OneDrive folder), Back up now. |
 | **Licensing** | 14-day free trial per computer, then a licence key made for that computer's Install ID. Keys are Ed25519-signed; only the admin's private key can create them. |
-| **Auto-update** | Signed updates from GitHub Releases. Owners/managers see a banner when a new version is out and install it from Settings → Updates. |
+| **Auto-update** | A window shows each new version after sign-in. Windows/Mac: signed update downloaded in the background, then *Restart and update*. Android: the APK downloads inside the app (Android's download manager) and Android's installer opens. No one is sent to a web page. |
+| **Start afresh** | Owner-only (Settings → Start afresh): clears items, categories, stock, deliveries and suppliers, and optionally receipts, customers, expenses and shifts. Password + typing RESET, safety backup first. Licence, device, settings, payment methods and staff stay. |
+| **Licence reminder** | Once a day during the trial (and in the last 7 days of a dated licence), a reminder with the days left and WhatsApp/email buttons. |
 | **How to** | The full user guide inside the app (Help → How to), with search and printing. It works offline. |
+| **Usage notice** | When online, one small notice to TechAlpha on first install and at most once a day (Install ID, version, device type, business name and type, licensed or not, and item/receipt/customer/staff totals). Never sales, prices, customer details or passwords. See `src-tauri/src/telemetry.rs`. |
 
 ## Requirements
 
@@ -237,6 +240,7 @@ estock-manager/
 - Licence keys are verified offline with an embedded Ed25519 public key; the private key never ships. The trial start is stored in two places and a clock-rollback guard stops trial extension by changing the date.
 - Updates are accepted only when signed with the release key (minisign), and are downloaded over HTTPS from GitHub Releases.
 - WhatsApp links are the only URLs the app may open (`https://wa.me/*`), plus the project's GitHub page.
+- The only network request the app makes on its own is the usage notice to `https://api.techalphahub.online/api/products/telemetry` (Rust side, 20-second timeout, retried every 15 minutes while offline).
 - SMTP credentials are stored in the local database, readable only through the Owner role in the app. Protect the Windows/macOS user account with a password, use a dedicated sending mailbox, and keep backups somewhere safe, since they contain your data.
 
 ## Account recovery (offline)
@@ -256,7 +260,7 @@ The same code builds an Android app (APK) in the release workflow. Differences o
 - **Android versions:** Android 7.0 (API 24) and newer, on phones and tablets (ARM 64/32-bit and x86). The Android build ships an extra compatibility bundle so it runs on old system WebViews too.
 - **Barcodes:** a **Scan** button on New sale uses the phone camera (USB/Bluetooth scanners also work).
 - **Receipt printing:** through the free **RawBT Print Service** app (Play Store), which drives 58/80 mm Bluetooth and USB thermal printers. Other pages (labels, statements, Z reports) print from the desktop app; statements can be sent on WhatsApp.
-- **Updates:** install the newer `_android.apk` from Releases over the old one (Settings → Updates has the link). Data is kept because every APK is signed with the same key.
+- **Updates:** from 3.4.0 the app finds new versions itself (`check_apk_update` reads the latest release), downloads the APK with Android's DownloadManager and opens the package installer (`REQUEST_INSTALL_PACKAGES`; bridge in `tools/android-native.mjs`). Data is kept because every APK is signed with the same key. Phones on 3.3.0 or older install 3.4.0 once by hand.
 - **Licence:** the Install ID is created on first run and stays the same until the app is uninstalled.
 - **Backups:** saved to the app's Documents folder on the phone.
 

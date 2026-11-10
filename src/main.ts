@@ -19,8 +19,8 @@ import './lib/enhance';
 import { auth } from './api';
 import { esc, toast } from './lib/dom';
 import { licence, renderLicenceScreen } from './lib/license-ui';
-import { checkForUpdate } from './lib/updater';
-import { isMobile } from './lib/platform';
+import { autoUpdate } from './lib/app-update';
+import { dailyLicenceReminder } from './lib/licence-reminder';
 import { applyTheme } from './lib/theme';
 import { store } from './store';
 import type { SessionInfo } from './types';
@@ -36,7 +36,8 @@ async function signedIn(session: SessionInfo) {
   applyTheme(store.settings.theme_primary, store.settings.theme_secondary, store.settings.theme_mode);
   shell = mountShell(app, signOut);
   showTrialBanner();
-  if (auth.can('manager') && !isMobile) checkUpdatesQuietly();
+  // One popup at a time: today's licence reminder first, then any new version.
+  dailyLicenceReminder().then(() => autoUpdate()).catch(() => undefined);
 }
 
 function showTrialBanner() {
@@ -46,14 +47,6 @@ function showTrialBanner() {
   shell.setBanner('trial', auth.can('owner')
     ? `<span>${left} Activate any time to keep using eStock Manager after the trial.</span><button class="btn btn-sm btn-primary" data-banner-go="settings" data-section="licence">Activate</button>`
     : `<span>${left} Ask the owner to activate eStock Manager.</span>`);
-}
-
-// Looks for a new version once per sign-in; never interrupts a sale.
-async function checkUpdatesQuietly() {
-  try {
-    const u = await checkForUpdate();
-    if (u && shell) shell.setBanner('update', `<span>eStock Manager <b>${esc(u.version)}</b> is ready to install.</span><button class="btn btn-sm btn-primary" data-banner-go="settings" data-section="updates">See update</button>`);
-  } catch { /* offline or no release yet: try again next sign-in */ }
 }
 
 function signOut() {

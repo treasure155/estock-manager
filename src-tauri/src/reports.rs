@@ -34,8 +34,13 @@ pub struct Dashboard {
     scope: String,
 }
 
+/// Reads one number. SQLite returns a decimal (REAL) for ROUND() and for sums of
+/// fractional quantities, so both whole and decimal results are accepted and
+/// rounded to whole kobo.
 fn scalar(conn: &Connection, sql: &str, p: impl rusqlite::Params) -> Result<i64, String> {
-    conn.query_row(sql, p, |r| r.get(0)).map_err(|e| e.to_string())
+    use rusqlite::types::Value;
+    let v: Value = conn.query_row(sql, p, |r| r.get(0)).map_err(|e| e.to_string())?;
+    Ok(match v { Value::Integer(i) => i, Value::Real(f) => f.round() as i64, _ => 0 })
 }
 
 #[tauri::command]
@@ -122,7 +127,7 @@ pub fn sales_report(state: tauri::State<'_, AppState>, session_token: String, fr
         .query_row(&format!("SELECT COUNT(*),COALESCE(SUM(subtotal_kobo),0),COALESCE(SUM(discount_kobo),0),COALESCE(SUM(tax_kobo),0),COALESCE(SUM(total_kobo),0),COALESCE(SUM(amount_paid_kobo),0) FROM receipts r WHERE r.payment_status<>'void' AND {range}"), params![from, to], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)))
         .map_err(|e| e.to_string())?;
     let voided = scalar(&conn, &format!("SELECT COUNT(*) FROM receipts r WHERE r.payment_status='void' AND {range}"), params![from, to])?;
-    let cost_kobo = scalar(&conn, &format!("SELECT COALESCE(SUM(ROUND(i.unit_cost_kobo*i.quantity)),0) FROM receipt_items i JOIN receipts r ON r.id=i.receipt_id WHERE r.payment_status<>'void' AND {range}"), params![from, to])?;
+    let cost_kobo = scalar(&conn, &format!("SELECT CAST(COALESCE(SUM(ROUND(i.unit_cost_kobo*i.quantity)),0) AS INTEGER) FROM receipt_items i JOIN receipts r ON r.id=i.receipt_id WHERE r.payment_status<>'void' AND {range}"), params![from, to])?;
     // Returns count on the day goods came back; their cost comes back into stock.
     let t_range = "date(t.created_at,'localtime') BETWEEN ?1 AND ?2";
     let returns_kobo = scalar(&conn, &format!("SELECT COALESCE(SUM(t.value_kobo),0) FROM returns t WHERE {t_range}"), params![from, to])?;
@@ -212,5 +217,29 @@ mod tests {
         assert_eq!(safe_file_name("../../etc/passwd"), "etc-passwd");
         assert_eq!(safe_file_name("sales 2026-10.csv"), "sales-2026-10.csv");
         assert_eq!(safe_file_name("..."), "export");
+    }
+
+    // Reports failed with "Invalid column type Real" once a sale existed,
+    // because ROUND() returns a decimal in SQLite.
+    #[test]
+    fn totals_accept_decimal_results() {
+        let conn = crate::db::test_conn();
+        let v = scalar(&conn, "SELECT COALESCE(SUM(ROUND(x)),0) FROM (SELECT 4800.0*1.5 AS x UNION ALL SELECT 4500*2)", []).unwrap();
+        assert_eq!(v, 16200);
+        assert_eq!(scalar(&conn, "SELECT COALESCE(SUM(1),0) WHERE 0", []).unwrap(), 0);
+        assert_eq!(scalar(&conn, "SELECT 2.6", []).unwrap(), 3);
+    }
+
+    #[test]
+    fn cost_of_sales_reads_with_real_sales() {
+        let conn = crate::db::test_conn();
+        crate::templates::apply_template(&conn, "supermarket", true, "Test").unwrap();
+        conn.execute("INSERT INTO receipts(receipt_no,subtotal_kobo,total_kobo,amount_paid_kobo,payment_status) VALUES('T-1',960000,960000,960000,'paid')", []).unwrap();
+        let rid = conn.last_insert_rowid();
+        conn.execute("INSERT INTO receipt_items(receipt_id,product_name,product_kind,unit,quantity,unit_price_kobo,unit_cost_kobo,line_total_kobo) VALUES(?1,'Rice','product','kg',2.5,384000,300000,960000)", [rid]).unwrap();
+        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+        let range = "date(r.created_at,'localtime') BETWEEN ?1 AND ?2";
+        let cost = scalar(&conn, &format!("SELECT CAST(COALESCE(SUM(ROUND(i.unit_cost_kobo*i.quantity)),0) AS INTEGER) FROM receipt_items i JOIN receipts r ON r.id=i.receipt_id WHERE r.payment_status<>'void' AND {range}"), rusqlite::params![today, today]).unwrap();
+        assert_eq!(cost, 750000);
     }
 }

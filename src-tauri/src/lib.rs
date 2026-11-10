@@ -2,6 +2,7 @@
 //! business, with role-based staff accounts. All data lives in one local
 //! SQLite database; the UI talks to it only through the commands below.
 
+mod apk_update;
 mod auth;
 mod backup;
 mod db;
@@ -13,9 +14,11 @@ mod license;
 mod purchases;
 mod recovery;
 mod reports;
+mod reset;
 mod sales;
 mod settings;
 mod shifts;
+mod telemetry;
 mod templates;
 
 use rusqlite::Connection;
@@ -80,11 +83,12 @@ pub fn run() {
                 license: Mutex::new(Some(lic)),
             });
             backup::start_auto(app.handle().clone());
+            telemetry::start(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             // public
-            auth::setup_status, auth::setup_owner, auth::login, settings::branding, templates::list_templates,
+            auth::setup_status, auth::setup_owner, auth::login, apk_update::check_apk_update, settings::branding, templates::list_templates,
             recovery::recovery_options, recovery::recover_account,
             license::license_status, license::activate_license,
             // security (owner)
@@ -112,7 +116,7 @@ pub fn run() {
             flocks::list_flocks, flocks::get_flock, flocks::save_flock, flocks::close_flock, flocks::add_flock_entry, flocks::delete_flock_entry, flocks::delete_flock,
             // reports, files & backups
             reports::dashboard, reports::sales_report, reports::save_export,
-            backup::backup_status, backup::save_backup_settings, backup::backup_now,
+            backup::backup_status, backup::save_backup_settings, backup::backup_now, reset::reset_business_data,
             // email
             email::send_receipt_email, email::send_test_email,
             // printing

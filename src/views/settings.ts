@@ -6,15 +6,16 @@ import { applyTheme, contrast, PRESETS } from '../lib/theme';
 import { store } from '../store';
 import type { BackupStatus, PaymentMethod, Receipt } from '../types';
 import { activationDialog, licence, vendorBlock, wireVendor } from '../lib/license-ui';
-import { appVersion, checkForUpdate, installUpdate } from '../lib/updater';
-import { isMobile, openExternal, RELEASES_URL } from '../lib/platform';
+import { appVersion } from '../lib/updater';
+import { checkNow } from '../lib/app-update';
+import { isMobile, openExternal } from '../lib/platform';
 import { VENDOR } from '../lib/vendor';
 import { shareWhatsApp } from '../lib/whatsapp';
 import { dateLabel, relativeDay } from '../lib/format';
 import type { ViewCtx } from './shell';
 import { questionFields, readQuestions, wireQuestionFields } from './recovery-ui';
 
-type Section = 'business' | 'receipts' | 'selling' | 'appearance' | 'email' | 'payments' | 'type' | 'security' | 'backup' | 'licence' | 'updates' | 'account' | 'about';
+type Section = 'business' | 'receipts' | 'selling' | 'appearance' | 'email' | 'payments' | 'type' | 'security' | 'backup' | 'reset' | 'licence' | 'updates' | 'account' | 'about';
 const SECTIONS: Array<{ key: Section; label: string; icon: string; owner: boolean }> = [
   { key: 'business', label: 'Business profile', icon: 'store', owner: true },
   { key: 'receipts', label: 'Receipts & tax', icon: 'receipt', owner: true },
@@ -25,6 +26,7 @@ const SECTIONS: Array<{ key: Section; label: string; icon: string; owner: boolea
   { key: 'type', label: 'Business type', icon: 'layers', owner: true },
   { key: 'security', label: 'Security & recovery', icon: 'shield', owner: true },
   { key: 'backup', label: 'Backup', icon: 'download', owner: true },
+  { key: 'reset', label: 'Start afresh', icon: 'trash', owner: true },
   { key: 'licence', label: 'Licence', icon: 'key', owner: true },
   { key: 'updates', label: 'Updates', icon: 'refresh', owner: true },
   { key: 'account', label: 'My account', icon: 'user', owner: false },
@@ -86,7 +88,7 @@ export async function render(ctx: ViewCtx) {
   await show();
 }
 
-const SECTION_FNS = { business, receipts, selling, appearance, email, payments, type: businessType, security, backup, licence: licenceSection, updates, account, about } as Record<Section, (b: HTMLElement, c: ViewCtx) => Promise<void> | void>;
+const SECTION_FNS = { business, receipts, selling, appearance, email, payments, type: businessType, security, backup, reset: startAfresh, licence: licenceSection, updates, account, about } as Record<Section, (b: HTMLElement, c: ViewCtx) => Promise<void> | void>;
 
 async function save(values: Record<string, string>, btn: HTMLButtonElement | null, after?: () => void) {
   await withBusy(btn, async () => {
@@ -474,6 +476,77 @@ async function backup(body: HTMLElement) {
   }));
 }
 
+// ---------------------------------------------------------------- start afresh
+
+type ResetResult = { removed_items: number; removed_receipts: number; loaded_items: number; backup_path: string };
+
+async function startAfresh(body: HTMLElement, ctx: ViewCtx) {
+  if (!auth.can('owner')) { body.innerHTML = '<p class="muted">Only the Owner can do this.</p>'; return; }
+  body.innerHTML = `${head('Start afresh', 'Clear the items and stock you used while trying the app, then set up your real stock.')}
+    <div class="form-narrow stack">
+      <div class="callout callout-danger"><div><b>This deletes data and cannot be undone from this screen</b><span>A safety backup is made first. Only the Owner can do this.</span></div></div>
+      <div class="reset-grid">
+        <div class="reset-box"><b>Will be deleted</b><ul>
+          <li>All items and services, with their prices and barcodes</li>
+          <li>Categories, stock counts, stock history and expiry batches</li>
+          <li>Deliveries (receive goods), suppliers and held sales</li>
+          <li data-sales-li hidden>Receipts, customers and what they owe, expenses and shifts</li></ul></div>
+        <div class="reset-box keep"><b>Stays the same</b><ul>
+          <li>Your licence and this device</li>
+          <li>Business name, logo, receipt and tax settings</li>
+          <li>Payment methods, colours and email settings</li>
+          <li>Staff accounts and passwords</li>
+          <li data-sales-keep>Receipts, customers, expenses and reports</li></ul></div>
+      </div>
+      <form class="stack" data-rform autocomplete="off">
+        <label class="check"><input type="checkbox" name="include_sales"><span><b>Also delete sales and test records</b><br><small class="muted">Receipts, customers and their balances, expenses and shifts. Choose this if everything so far was only a test.</small></span></label>
+        <div class="stack-sm"><span class="field-label">After clearing</span>
+          <label class="check"><input type="radio" name="after" value="empty" checked><span><b>Start with an empty item list</b><br><small class="muted">You add your own items in Inventory.</small></span></label>
+          <label class="check"><input type="radio" name="after" value="reload"><span><b>Load the ready-made items again</b><br><small class="muted">The starter items for your business type, which you then edit.</small></span></label>
+        </div>
+        <label class="field"><span>Your password</span><input name="password" type="password" required autocomplete="current-password"></label>
+        <label class="field"><span>Type <b>RESET</b> to confirm</span><input name="confirm" required autocapitalize="characters" spellcheck="false" placeholder="RESET"></label>
+        <p class="form-error" role="alert" data-err></p>
+        <div class="form-actions start"><button class="btn btn-danger" data-go disabled>${icon('trash', 16)} Start afresh</button></div>
+      </form>
+    </div>`;
+  const form = $<HTMLFormElement>('[data-rform]', body)!;
+  const btn = $<HTMLButtonElement>('[data-go]', form)!;
+  const sync = () => {
+    const v = formValues(form);
+    const all = v.include_sales === '1';
+    $('[data-sales-li]', body)!.hidden = !all;
+    $('[data-sales-keep]', body)!.hidden = all;
+    btn.disabled = !(v.password && v.confirm.trim().toUpperCase() === 'RESET');
+  };
+  form.addEventListener('input', sync);
+  form.addEventListener('change', sync);
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const v = formValues(form);
+    const all = v.include_sales === '1';
+    const ok = await confirmDialog({
+      title: 'Delete and start afresh?',
+      message: all
+        ? 'All items, stock, receipts, customers, expenses and shifts will be deleted. Your licence, settings and staff stay. Are you sure?'
+        : 'All items, categories and stock will be deleted. Receipts and reports stay. Are you sure?',
+      confirm: 'Yes, delete', danger: true,
+    });
+    if (ok === null) return;
+    const err = $('[data-err]', form)!;
+    err.textContent = '';
+    await withBusy(btn, async () => {
+      try {
+        const r = await call<ResetResult>('reset_business_data', { input: { password: v.password, confirm: v.confirm, include_sales: all, reload_items: v.after === 'reload' } });
+        store.products = []; store.categories = [];
+        await store.loadSettings();
+        toast(r.loaded_items ? `Done. ${r.loaded_items} ready-made items loaded. Edit them in Inventory.` : 'Done. Add your items in Inventory.');
+        ctx.go('inventory');
+      } catch (x) { err.textContent = errText(x); }
+    });
+  });
+}
+
 // ---------------------------------------------------------------- licence
 
 async function licenceSection(body: HTMLElement) {
@@ -498,43 +571,18 @@ async function licenceSection(body: HTMLElement) {
 
 async function updates(body: HTMLElement) {
   const version = await appVersion();
-  if (isMobile) {
-    body.innerHTML = `${head('Updates', 'On Android, new versions are installed from the latest APK file. Your data stays on the phone when you install over the old version.')}
-      <div class="form-narrow stack">
-        <div class="figures figures-2"><div><span>This version</span><b>${esc(version || 'Unknown')}</b></div><div><span>Where to get updates</span><b>GitHub releases</b></div></div>
-        <ol class="steps-list"><li>Tap <b>Get the latest version</b>.</li><li>Download the file ending in <b>_android.apk</b>.</li><li>Open it and tap <b>Update</b>. Allow installing from your browser if Android asks.</li></ol>
-        <div><button class="btn btn-primary" data-dl>${icon('download', 16)} Get the latest version</button></div>
-      </div>`;
-    $('[data-dl]', body)!.addEventListener('click', () => openExternal(RELEASES_URL));
-    return;
-  }
-  body.innerHTML = `${head('Updates', 'New versions are published by your provider. eStock Manager checks when an owner or manager signs in, and installs only updates signed by the provider.')}
+  body.innerHTML = `${head('Updates', isMobile
+    ? 'New versions download inside the app and install over this one. You are told on screen when one is ready; there is nothing to look for.'
+    : 'New versions are published by your provider. The app checks when you sign in, downloads the update in the background and asks you to restart. Only updates signed by the provider are installed.')}
     <div class="form-narrow stack">
-      <div class="figures figures-2"><div><span>This version</span><b>${esc(version || 'Unknown')}</b></div><div><span>Status</span><b data-ustate>Checking…</b></div></div>
+      <div class="figures figures-2"><div><span>This version</span><b>${esc(version || 'Unknown')}</b></div><div><span>Updates</span><b>Automatic</b></div></div>
       <div data-uout></div>
-      <div class="form-actions start"><button class="btn btn-ghost" data-check>${icon('refresh', 16)} Check again</button></div>
-      <p class="muted small">Your data stays in place during an update. A backup is still a good idea first (Settings → Backup).</p>
+      <div class="form-actions start"><button class="btn btn-ghost" data-check>${icon('refresh', 16)} Check now</button></div>
+      <p class="muted small">Your data stays in place during an update.${isMobile ? ' The first time, Android may ask you to allow eStock Manager to install updates. Turn it on and come back to the app.' : ' A backup is still a good idea first (Settings → Backup).'}</p>
     </div>`;
-  const out = $('[data-uout]', body)!, stateEl = $('[data-ustate]', body)!;
-  const run = async () => {
-    stateEl.textContent = 'Checking…'; out.innerHTML = '';
-    try {
-      const u = await checkForUpdate();
-      if (!u) { stateEl.textContent = 'Up to date'; return; }
-      stateEl.innerHTML = `<span class="warn-text">${esc(u.version)} available</span>`;
-      out.innerHTML = `<div class="callout callout-info">${icon('refresh', 18)}<div><b>eStock Manager ${esc(u.version)}</b>${u.body ? `<span class="pre-wrap">${esc(u.body)}</span>` : ''}<div><button class="btn btn-primary" data-install>Download and install</button></div><span class="muted small" data-prog></span></div></div>`;
-      $<HTMLButtonElement>('[data-install]', out)!.addEventListener('click', (e) => withBusy(e.currentTarget as HTMLButtonElement, async () => {
-        const prog = $('[data-prog]', out)!;
-        prog.textContent = 'Downloading…';
-        await installUpdate(u, (pct) => { prog.textContent = pct === null ? 'Downloading…' : pct >= 100 ? 'Installing. The app will restart…' : `Downloading… ${pct}%`; });
-      }));
-    } catch (x) {
-      stateEl.textContent = 'Could not check';
-      out.innerHTML = `<p class="muted small">${esc(errText(x))}. Check the internet connection and try again.</p>`;
-    }
-  };
-  $('[data-check]', body)!.addEventListener('click', run);
-  run();
+  const out = $('[data-uout]', body)!;
+  $('[data-check]', body)!.addEventListener('click', () => checkNow(out));
+  checkNow(out);
 }
 
 // ---------------------------------------------------------------- account
@@ -564,7 +612,7 @@ async function about(body: HTMLElement) {
         <button type="button" class="btn btn-primary" data-about-wa>${icon('chat', 16)} Chat on WhatsApp</button>
         <button type="button" class="btn btn-ghost" data-about-mail>${icon('mail', 16)} Send an email</button>
       </div>
-      <p class="muted small">Built by TechAlpha Global Concept. Your records stay on this ${isMobile ? 'phone' : 'computer'}; nothing is sent anywhere unless you email or WhatsApp it.</p>
+      <p class="muted small">Built by TechAlpha Global Concept. Your records stay on this ${isMobile ? 'phone' : 'computer'}; sales, prices and customer details are never sent anywhere unless you email or WhatsApp them.</p>
     </div>`;
   const hello = `Hello ${VENDOR.name}, I use eStock Manager ${version} (${platformName}).${lic ? ` Install ID: ${lic.install_id}.` : ''}\n`;
   $('[data-about-wa]', body)!.addEventListener('click', () => shareWhatsApp(VENDOR.whatsapp, hello));

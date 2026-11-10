@@ -223,6 +223,7 @@ export const GUIDE: GuideSection[] = [
       <li>TechAlpha Hub sends back a licence key starting with <code>ESTK-</code>. Paste it into the box and click <b>Activate</b>.</li>
     </ol>
     <p>A key only works on the computer whose Install ID it was made for. A second shop computer needs its own key. If the trial or a dated licence ends, the app shows the activation screen; your sales, stock and customers are kept safe and come back as soon as you activate.</p>
+    <p>During the trial, and in the last week of a dated licence, a reminder shows once a day with the days left and the WhatsApp and email buttons. Tap <b>Remind me tomorrow</b> to close it for the day.</p>
     <p class="guide-note">Setting the computer clock backwards does not extend the trial, and reinstalling the app does not restart it.</p>`,
   },
   {
@@ -334,9 +335,20 @@ export const GUIDE: GuideSection[] = [
   },
   {
     id: 'updates', title: 'Updates', who: 'Owner',
-    html: `<p class="guide-lead">When your provider releases a new version, a strip appears at the top for owners and managers.</p>
-    <ol><li>Click <b>See update</b>, or open <b>Settings → Updates</b>.</li><li>Click <b>Download and install</b>. The app restarts by itself.</li></ol>
-    <p>Your data stays in place. Only updates signed by your provider are accepted.</p>`,
+    html: `<p class="guide-lead">You do not need to look for updates. When a new version is out, a window shows it on screen after you sign in.</p>
+    <ol><li><b>Windows and Mac:</b> the update downloads in the background. Click <b>Restart and update</b>, and the app reopens on the new version.</li>
+    <li><b>Android:</b> tap <b>Update now</b>. The phone downloads it (you see the progress, and a notification), then Android shows its install screen: tap <b>Update</b>. The first time, Android may ask you to allow eStock Manager to install updates; switch it on and go back to the app.</li></ol>
+    <p>Tap <b>Later</b> to be asked again next time. <b>Settings → Updates → Check now</b> looks straight away. Your data stays in place, and only updates signed by your provider are accepted.</p>`,
+  },
+  {
+    id: 'afresh', title: 'Start afresh (clear test data)', who: 'Owner',
+    html: `<p class="guide-lead">Tried the app with the ready-made items or test sales? Clear them and set up your real stock. Only the Owner can do this.</p>
+    <ol><li>Open <b>Settings → Start afresh</b>.</li>
+    <li>Choose whether to <b>also delete sales and test records</b> (receipts, customers, expenses and shifts). Leave it off to keep your sales history.</li>
+    <li>Choose to start with an <b>empty item list</b>, or to <b>load the ready-made items again</b>.</li>
+    <li>Enter your password, type <b>RESET</b>, tap <b>Start afresh</b> and confirm.</li></ol>
+    <p>All items, categories, stock counts, stock history, expiry batches, deliveries and suppliers are deleted. Your licence, this device, business details, receipt settings, payment methods, colours, email settings and staff accounts stay the same.</p>
+    <p class="guide-note">A safety backup is made first. If you reset by mistake, restore that backup (see Backups and your data).</p>`,
   },
   {
     id: 'customers', title: 'Customers and money owed',
@@ -406,11 +418,11 @@ export const GUIDE: GuideSection[] = [
     id: 'android', title: 'Using eStock Manager on Android',
     html: `<p class="guide-lead">eStock Manager also runs on Android phones and tablets, with the same features and the same licence prices.</p>
     <ol>
-      <li><b>Install:</b> on the phone, open the latest release page, download the file ending in <b>_android.apk</b>, open it and tap <b>Install</b>. Allow installing from your browser if Android asks.</li>
-      <li><b>Menu:</b> tap ☰ at the top left to move between pages.</li>
+      <li><b>Install:</b> download eStock Manager for Android from techalphahub.online/products/estock-manager/download, open the file and tap <b>Install</b>. Works on Android 7.0 and newer.</li>
+      <li><b>Moving around:</b> the bar at the bottom goes to Home, Sell, Receipts, Customers and Menu. The phone's back button works too.</li>
       <li><b>Scan barcodes:</b> on New sale, tap <b>Scan</b> and point the camera at the barcode. Allow camera access the first time.</li>
       <li><b>Print receipts:</b> install the free <b>RawBT Print Service</b> app from the Play Store and pair your Bluetooth or USB receipt printer in it once. Then tap <b>Print receipt</b> in eStock Manager.</li>
-      <li><b>Updates:</b> Settings → Updates → <b>Get the latest version</b>, download the new APK and tap <b>Update</b>. Your data stays.</li>
+      <li><b>Updates:</b> a new version shows on screen by itself. Tap <b>Update now</b>, then <b>Update</b> on Android's screen. Your data stays.</li>
     </ol>
     <p>Each phone needs its own licence key, like each computer. Labels, statements and shift reports print from the Windows or Mac app; statements can be sent on WhatsApp from the phone.</p>`,
   },
@@ -424,6 +436,16 @@ export const GUIDE: GuideSection[] = [
       <li><b>Broiler farm:</b> keep a daily record on the Flocks page; it works out mortality, FCR and profit for you.</li>
       <li><b>Farm produce:</b> sell to regular buyers on credit, and check Customers → Only those who owe each week.</li>
     </ul>`,
+  },
+  {
+    id: 'privacy', title: 'What the app sends to TechAlpha',
+    html: `<p class="guide-lead">eStock Manager works offline. When this device has internet, it sends TechAlpha one small notice the first time, and at most one a day after that.</p>
+    <p>This tells TechAlpha how many businesses use the app and which versions are in use, so we know who to tell about updates.</p>
+    ${table(['Sent', 'Never sent'], [[
+      'The Install ID, app version and device type; the business name and type from Settings; whether the app is licensed; the number of items, receipts, customers and staff accounts',
+      'Sales details, prices or amounts; customer names, phone numbers or emails; passwords; email settings; your database or backups',
+    ]])}
+    <p>If there is no internet, nothing is sent and nothing slows down. The app simply tries again later.</p>`,
   },
   {
     id: 'troubleshooting', title: 'Troubleshooting',

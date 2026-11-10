@@ -3,6 +3,7 @@
 // features to the generated Android project that the web page cannot do by itself:
 //   - share a PDF file straight into WhatsApp (or any app)
 //   - open Android's own print screen (Save as PDF / printers) with a PDF
+//   - download a new version with Android's download manager and open the installer
 // The page reaches them as window.EstockNative. If anything below does not match the
 // generated project, the build carries on without them and the app falls back to
 // the old behaviour (text message / RawBT).
@@ -44,14 +45,23 @@ try {
       const paths = join(xmlDir, 'file_paths.xml');
       if (existsSync(paths)) {
         let x = readFileSync(paths, 'utf8');
-        if (!/<cache-path/.test(x)) { x = x.replace(/<\/paths>/, '    <cache-path name="estock_cache" path="." />\n</paths>'); writeFileSync(paths, x); }
+        if (!/<cache-path/.test(x)) x = x.replace(/<\/paths>/, '    <cache-path name="estock_cache" path="." />\n</paths>');
+        if (!/estock_updates/.test(x)) x = x.replace(/<\/paths>/, '    <external-files-path name="estock_updates" path="Download/" />\n</paths>');
+        writeFileSync(paths, x);
       }
     } else { throw new Error('an unexpected FileProvider is already declared'); }
   } else {
     authority = '${applicationId}.estockshare';
     kotlinAuthority = 'activity.packageName + ".estockshare"';
-    writeFileSync(join(xmlDir, 'estock_share_paths.xml'), '<?xml version="1.0" encoding="utf-8"?>\n<paths>\n    <cache-path name="estock_cache" path="." />\n</paths>\n');
+    writeFileSync(join(xmlDir, 'estock_share_paths.xml'), '<?xml version="1.0" encoding="utf-8"?>\n<paths>\n    <cache-path name="estock_cache" path="." />\n    <external-files-path name="estock_updates" path="Download/" />\n</paths>\n');
     manifest = manifest.replace('</application>', `    <provider android:name="androidx.core.content.FileProvider" android:authorities="${authority}" android:exported="false" android:grantUriPermissions="true">\n            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/estock_share_paths" />\n        </provider>\n    </application>`);
+    writeFileSync(manifestPath, manifest);
+  }
+
+  // ---- permission to hand a downloaded update to Android's installer (Android 8+ asks the user once)
+  manifest = readFileSync(manifestPath, 'utf8');
+  if (!manifest.includes('REQUEST_INSTALL_PACKAGES')) {
+    manifest = manifest.replace(/(<manifest[^>]*>)/, '$1\n    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />');
     writeFileSync(manifestPath, manifest);
   }
 
@@ -59,10 +69,14 @@ try {
   writeFileSync(join(activity, '..', 'NativeBridge.kt'), `package ${pkg}
 
 import android.app.Activity
+import android.app.DownloadManager
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.os.Environment
 import android.os.CancellationSignal
 import android.os.ParcelFileDescriptor
 import android.print.PageRange
@@ -70,6 +84,7 @@ import android.print.PrintAttributes
 import android.print.PrintDocumentAdapter
 import android.print.PrintDocumentInfo
 import android.print.PrintManager
+import android.provider.Settings
 import android.util.Base64
 import android.webkit.JavascriptInterface
 import androidx.core.content.FileProvider
@@ -133,6 +148,88 @@ class NativeBridge(private val activity: Activity) {
         }
     }
 
+    // ---------------------------------------------------------------- updates
+
+    private fun updatesDir(): File {
+        val dir = activity.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: File(activity.filesDir, "Download")
+        dir.mkdirs()
+        return dir
+    }
+
+    private fun updateFile(name: String): File = File(updatesDir(), name.replace(Regex("[^A-Za-z0-9._-]"), "_"))
+
+    /** "1" when this app may open the installer, "0" when Android must ask the user first. */
+    @JavascriptInterface
+    fun canInstallUpdates(): String =
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O || activity.packageManager.canRequestPackageInstalls()) "1" else "0"
+
+    /** Opens Android's "Install unknown apps" switch for eStock Manager. */
+    @JavascriptInterface
+    fun askInstallPermission(): String {
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val i = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:" + activity.packageName))
+                activity.startActivity(i)
+            }
+            ""
+        } catch (e: Exception) { e.message ?: "Could not open the setting" }
+    }
+
+    /** Starts the download. Returns the download number, or "ERR:" and a message. */
+    @JavascriptInterface
+    fun downloadUpdate(url: String, name: String, title: String): String {
+        return try {
+            if (!url.startsWith("https://github.com/treasure155/estock-manager/releases/download/")) return "ERR:Unknown update address"
+            val file = updateFile(name)
+            updatesDir().listFiles()?.forEach { if (it.name.endsWith(".apk")) it.delete() }
+            val req = DownloadManager.Request(Uri.parse(url))
+            req.setTitle(title)
+            req.setDescription("Downloading the new version")
+            req.setMimeType("application/vnd.android.package-archive")
+            req.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE)
+            req.setDestinationUri(Uri.fromFile(file))
+            val dm = activity.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+            dm.enqueue(req).toString()
+        } catch (e: Exception) { "ERR:" + (e.message ?: "Could not start the download") }
+    }
+
+    /** "running:45", "done:100" or "failed:0" */
+    @JavascriptInterface
+    fun updateProgress(id: String): String {
+        return try {
+            val dm = activity.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+            val c = dm.query(DownloadManager.Query().setFilterById(id.toLong()))
+            c.use {
+                if (!it.moveToFirst()) return "failed:0"
+                val status = it.getInt(it.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
+                val done = it.getLong(it.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR))
+                val total = it.getLong(it.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES))
+                val pct = if (total > 0) (done * 100 / total).toInt() else 0
+                val state = when (status) {
+                    DownloadManager.STATUS_SUCCESSFUL -> "done"
+                    DownloadManager.STATUS_FAILED -> "failed"
+                    else -> "running"
+                }
+                state + ":" + pct
+            }
+        } catch (e: Exception) { "failed:0" }
+    }
+
+    /** Opens Android's installer for the downloaded file. */
+    @JavascriptInterface
+    fun installUpdate(name: String): String {
+        return try {
+            val file = updateFile(name)
+            if (!file.exists()) return "The downloaded file was not found. Try again."
+            val uri = FileProvider.getUriForFile(activity, ${kotlinAuthority}, file)
+            val i = Intent(Intent.ACTION_VIEW)
+            i.setDataAndType(uri, "application/vnd.android.package-archive")
+            i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+            activity.startActivity(i)
+            ""
+        } catch (e: Exception) { e.message ?: "Could not open the installer" }
+    }
+
     private class PdfAdapter(private val data: ByteArray, private val docName: String) : PrintDocumentAdapter() {
         override fun onLayout(oldAttributes: PrintAttributes?, newAttributes: PrintAttributes?, cancellationSignal: CancellationSignal?, callback: LayoutResultCallback?, extras: Bundle?) {
             if (cancellationSignal?.isCanceled == true) { callback?.onLayoutCancelled(); return }
@@ -167,7 +264,7 @@ class NativeBridge(private val activity: Activity) {
     else throw new Error('class MainActivity declaration not recognised');
     writeFileSync(activity, src);
   }
-  console.log('✔ Android: PDF share and print bridge added');
+  console.log('✔ Android: PDF share, print and in-app update bridge added');
 } catch (e) {
   console.warn(`⚠ Android PDF share/print bridge was not added (${e.message}). The app will use the plain WhatsApp message and RawBT instead.`);
 }
